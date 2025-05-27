@@ -61,6 +61,8 @@ class ADCController {
     registerMemberFunction(adcChannelSystemFullScaleCal,
                                "ADC_CH_FULL_SC_CAL");
     registerMemberFunctionVector(timeSeriesAdcRead, "TIME_SERIES_ADC_READ");
+    registerMemberFunction(setRDYFN, "SET_RDYFN");
+    registerMemberFunction(unsetRDYFN, "UNSET_RDYFN");
   }
 
   inline static void addBoard(int cs_pin, int data_ready,
@@ -186,15 +188,17 @@ class ADCController {
 
   //Sets the RDYFN bit in the IO register to 1
   //This ensures the RDY pin goes low once all ADCs cycle through their conversion process in continuous read mode
-  inline static void setRDYFN(int adc_channel) {
+  inline static OperationResult setRDYFN(int adc_channel) {
     adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].setRDYFN();
+    return OperationResult::Success("Set RDYFN");
   }
 
   //unsets the RDYFN bit in the IO register to 1
   //This ensures the RDY pin goes low once all ADCs cycle through their conversion process in continuous read mode
   //This needs to be done after fininshing a buffer ramp to take the ADC out of continuous conversion mode
-  inline static void unsetRDYFN(int adc_channel) {
+  inline static OperationResult unsetRDYFN(int adc_channel) {
     adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].unsetRDYFN();
+    return OperationResult::Success("Unset RDYFN");
   }
 
   inline static double getVoltageData(int adc_channel) {
