@@ -338,6 +338,11 @@ class ADCBoard {
     return getConversionTime(channel, moreThanOneChannelActive);
   }
 
+  float setConversionTimeFW(int channel, int filter_word) {
+    return setConversionTime(channel, true, filter_word,
+                            isMoreThanOneChannelActive());
+  }
+
   float getConversionTime(int channel) {
     return getConversionTime(channel, isMoreThanOneChannelActive());
   }

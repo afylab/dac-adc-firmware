@@ -48,6 +48,7 @@ class ADCController {
   static void initializeRegistry() {
     registerMemberFunction(readChannelVoltage, "GET_ADC");
     registerMemberFunction(setConversionTime, "CONVERT_TIME");
+    registerMemberFunction(setConversionTimeFW, "CONVERT_TIME_FW");
     registerMemberFunction(getConversionTime, "GET_CONVERT_TIME");
     registerMemberFunction(continuousConvertRead,
                                "CONTINUOUS_CONVERT_READ");
@@ -321,6 +322,20 @@ class ADCController {
     float setpoint =
         adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].setConversionTime(
             getChannelIndexFromGlobalIndex(adc_channel), time_us);
+    if (setpoint == -1.0) {
+      return OperationResult::Failure(
+          "The filter word you selected is not valid.");
+    }
+    return OperationResult::Success(String(setpoint, 9));
+  }
+
+  static OperationResult setConversionTimeFW(int adc_channel, int filter_word) {
+    if (!isChannelIndexValid(adc_channel)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
+    float setpoint =
+        adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].setConversionTimeFW(
+            getChannelIndexFromGlobalIndex(adc_channel), filter_word);
     if (setpoint == -1.0) {
       return OperationResult::Failure(
           "The filter word you selected is not valid.");
