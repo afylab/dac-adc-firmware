@@ -12,16 +12,16 @@ public:
     // Make DMA handles public for interrupt access
     inline static DMA_HandleTypeDef hdma_spi1_tx;
     inline static DMA_HandleTypeDef hdma_spi1_rx;
-    inline static DMA_HandleTypeDef hdma_spi2_tx; 
-    inline static DMA_HandleTypeDef hdma_spi2_rx;
+    inline static DMA_HandleTypeDef hdma_spi6_tx; 
+    inline static DMA_HandleTypeDef hdma_spi6_rx;
     
 private:
     inline static bool spiInitialized = false;
     inline static bool dmaInitialized = false;
     
-    // SPI handles
-    inline static SPI_HandleTypeDef hspi1; // DAC SPI
-    inline static SPI_HandleTypeDef hspi2; // ADC SPI
+    // SPI handles - Arduino SPI maps to SPI1, Arduino SPI1 maps to SPI6
+    inline static SPI_HandleTypeDef hspi1; // Arduino SPI (DAC)
+    inline static SPI_HandleTypeDef hspi6; // Arduino SPI1 (ADC on new shield)
     
     // Transfer completion flags
     inline static volatile bool dacTxComplete = true;
@@ -118,8 +118,8 @@ public:
     }
     
     static void beginAdcTransaction() {
-        // Begin ADC SPI transaction
-        HAL_SPI_StateTypeDef state = HAL_SPI_GetState(&hspi2);
+        // Begin ADC SPI transaction - use SPI1 for old shield
+        HAL_SPI_StateTypeDef state = HAL_SPI_GetState(&hspi1);
         if (state == HAL_SPI_STATE_READY) {
             // Configure for ADC settings
             configureSPIForADC();
@@ -158,9 +158,9 @@ private:
     static void initializeSPI() {
         // Enable SPI clocks
         __HAL_RCC_SPI1_CLK_ENABLE();
-        __HAL_RCC_SPI2_CLK_ENABLE();
+        __HAL_RCC_SPI6_CLK_ENABLE();
         
-        // Configure SPI1 for DAC - use STM32 HAL peripheral base
+        // Configure SPI1 for DAC (Arduino SPI) - use STM32 HAL peripheral base
         hspi1.Instance = (SPI_TypeDef *)SPI1_BASE;
         #ifdef __NEW_SHIELD__
         hspi1.Init.Mode = SPI_MODE_MASTER;
@@ -201,44 +201,44 @@ private:
             // Error handling
         }
         
-        // Configure SPI2 for ADC - use STM32 HAL peripheral base  
-        hspi2.Instance = (SPI_TypeDef *)SPI2_BASE;
+        // Configure SPI6 for ADC (Arduino SPI1) - use STM32 HAL peripheral base  
+        hspi6.Instance = (SPI_TypeDef *)SPI6_BASE;
         #ifdef __NEW_SHIELD__
-        hspi2.Init.Mode = SPI_MODE_MASTER;
-        hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-        hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
-        hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
-        hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
-        hspi2.Init.NSS = SPI_NSS_SOFT;
-        hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; // 8MHz target
-        hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
-        hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
-        hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
-        hspi2.Init.CRCPolynomial = 0x0;
-        hspi2.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
-        hspi2.Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
-        hspi2.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
-        hspi2.Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-        hspi2.Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
-        hspi2.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
-        hspi2.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
-        hspi2.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
-        hspi2.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
-        hspi2.Init.IOSwap = SPI_IO_SWAP_DISABLE;
+        hspi6.Init.Mode = SPI_MODE_MASTER;
+        hspi6.Init.Direction = SPI_DIRECTION_2LINES;
+        hspi6.Init.DataSize = SPI_DATASIZE_8BIT;
+        hspi6.Init.CLKPolarity = SPI_POLARITY_LOW;
+        hspi6.Init.CLKPhase = SPI_PHASE_1EDGE;
+        hspi6.Init.NSS = SPI_NSS_SOFT;
+        hspi6.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_32; // 8MHz target
+        hspi6.Init.FirstBit = SPI_FIRSTBIT_MSB;
+        hspi6.Init.TIMode = SPI_TIMODE_DISABLE;
+        hspi6.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+        hspi6.Init.CRCPolynomial = 0x0;
+        hspi6.Init.NSSPMode = SPI_NSS_PULSE_DISABLE;
+        hspi6.Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
+        hspi6.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
+        hspi6.Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+        hspi6.Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+        hspi6.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
+        hspi6.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
+        hspi6.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
+        hspi6.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+        hspi6.Init.IOSwap = SPI_IO_SWAP_DISABLE;
         #else
-        hspi2.Init.Mode = SPI_MODE_MASTER;
-        hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-        hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
-        hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;
-        hspi2.Init.CLKPhase = SPI_PHASE_2EDGE;
-        hspi2.Init.NSS = SPI_NSS_SOFT;
-        hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64; // 4MHz target
-        hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
-        hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
-        hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+        hspi6.Init.Mode = SPI_MODE_MASTER;
+        hspi6.Init.Direction = SPI_DIRECTION_2LINES;
+        hspi6.Init.DataSize = SPI_DATASIZE_8BIT;
+        hspi6.Init.CLKPolarity = SPI_POLARITY_HIGH;
+        hspi6.Init.CLKPhase = SPI_PHASE_2EDGE;
+        hspi6.Init.NSS = SPI_NSS_SOFT;
+        hspi6.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64; // 4MHz target
+        hspi6.Init.FirstBit = SPI_FIRSTBIT_MSB;
+        hspi6.Init.TIMode = SPI_TIMODE_DISABLE;
+        hspi6.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
         #endif
         
-        if (HAL_SPI_Init(&hspi2) != HAL_OK) {
+        if (HAL_SPI_Init(&hspi6) != HAL_OK) {
             // Error handling
         }
     }
@@ -284,41 +284,41 @@ private:
         
         __HAL_LINKDMA(&hspi1, hdmarx, hdma_spi1_rx);
         
-        // Configure DMA for SPI2 TX (ADC)
-        hdma_spi2_tx.Instance = DMA1_Stream3;
-        hdma_spi2_tx.Init.Request = DMA_REQUEST_SPI2_TX;
-        hdma_spi2_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
-        hdma_spi2_tx.Init.PeriphInc = DMA_PINC_DISABLE;
-        hdma_spi2_tx.Init.MemInc = DMA_MINC_ENABLE;
-        hdma_spi2_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-        hdma_spi2_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
-        hdma_spi2_tx.Init.Mode = DMA_NORMAL;
-        hdma_spi2_tx.Init.Priority = DMA_PRIORITY_HIGH;
-        hdma_spi2_tx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+        // Configure DMA for SPI6 TX (ADC)
+        hdma_spi6_tx.Instance = DMA2_Stream1;
+        hdma_spi6_tx.Init.Request = DMA_REQUEST_SPI6_TX;
+        hdma_spi6_tx.Init.Direction = DMA_MEMORY_TO_PERIPH;
+        hdma_spi6_tx.Init.PeriphInc = DMA_PINC_DISABLE;
+        hdma_spi6_tx.Init.MemInc = DMA_MINC_ENABLE;
+        hdma_spi6_tx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_spi6_tx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+        hdma_spi6_tx.Init.Mode = DMA_NORMAL;
+        hdma_spi6_tx.Init.Priority = DMA_PRIORITY_HIGH;
+        hdma_spi6_tx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
         
-        if (HAL_DMA_Init(&hdma_spi2_tx) != HAL_OK) {
+        if (HAL_DMA_Init(&hdma_spi6_tx) != HAL_OK) {
             // Error handling
         }
         
-        __HAL_LINKDMA(&hspi2, hdmatx, hdma_spi2_tx);
+        __HAL_LINKDMA(&hspi6, hdmatx, hdma_spi6_tx);
         
-        // Configure DMA for SPI2 RX (ADC)
-        hdma_spi2_rx.Instance = DMA1_Stream4;
-        hdma_spi2_rx.Init.Request = DMA_REQUEST_SPI2_RX;
-        hdma_spi2_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
-        hdma_spi2_rx.Init.PeriphInc = DMA_PINC_DISABLE;
-        hdma_spi2_rx.Init.MemInc = DMA_MINC_ENABLE;
-        hdma_spi2_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
-        hdma_spi2_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
-        hdma_spi2_rx.Init.Mode = DMA_NORMAL;
-        hdma_spi2_rx.Init.Priority = DMA_PRIORITY_HIGH;
-        hdma_spi2_rx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
+        // Configure DMA for SPI6 RX (ADC)
+        hdma_spi6_rx.Instance = DMA2_Stream2;
+        hdma_spi6_rx.Init.Request = DMA_REQUEST_SPI6_RX;
+        hdma_spi6_rx.Init.Direction = DMA_PERIPH_TO_MEMORY;
+        hdma_spi6_rx.Init.PeriphInc = DMA_PINC_DISABLE;
+        hdma_spi6_rx.Init.MemInc = DMA_MINC_ENABLE;
+        hdma_spi6_rx.Init.PeriphDataAlignment = DMA_PDATAALIGN_BYTE;
+        hdma_spi6_rx.Init.MemDataAlignment = DMA_MDATAALIGN_BYTE;
+        hdma_spi6_rx.Init.Mode = DMA_NORMAL;
+        hdma_spi6_rx.Init.Priority = DMA_PRIORITY_HIGH;
+        hdma_spi6_rx.Init.FIFOMode = DMA_FIFOMODE_DISABLE;
         
-        if (HAL_DMA_Init(&hdma_spi2_rx) != HAL_OK) {
+        if (HAL_DMA_Init(&hdma_spi6_rx) != HAL_OK) {
             // Error handling
         }
         
-        __HAL_LINKDMA(&hspi2, hdmarx, hdma_spi2_rx);
+        __HAL_LINKDMA(&hspi6, hdmarx, hdma_spi6_rx);
         
         // Enable DMA interrupts
         HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, 1, 0);
@@ -327,11 +327,11 @@ private:
         HAL_NVIC_SetPriority(DMA1_Stream2_IRQn, 1, 0);
         HAL_NVIC_EnableIRQ(DMA1_Stream2_IRQn);
         
-        HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 1, 0);
-        HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
+        HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, 1, 0);
+        HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
         
-        HAL_NVIC_SetPriority(DMA1_Stream4_IRQn, 1, 0);
-        HAL_NVIC_EnableIRQ(DMA1_Stream4_IRQn);
+        HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, 1, 0);
+        HAL_NVIC_EnableIRQ(DMA2_Stream2_IRQn);
     }
     
     static void configureSPIForDAC() {
@@ -346,15 +346,20 @@ private:
     
     static void configureSPIForADC() {
         #ifndef __NEW_SHIELD__
-        // Reconfigure SPI2 for ADC settings
-        hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;
-        hspi2.Init.CLKPhase = SPI_PHASE_2EDGE;
-        hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64; // 4MHz
-        HAL_SPI_Init(&hspi2);
+        // Reconfigure SPI1 for ADC settings (old shield uses same SPI)
+        hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
+        hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
+        hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_64; // 4MHz
+        HAL_SPI_Init(&hspi1);
         #endif
     }
     
     void transferDACDMA(void* buf, size_t count, bool useTransaction) {
+        // Auto-initialize if not done yet
+        if (!spiInitialized || !dmaInitialized) {
+            setup();
+        }
+        
         if (count > sizeof(dacTxBuffer)) {
             // Handle error - buffer too large
             return;
@@ -386,6 +391,11 @@ private:
     }
     
     void transferADCDMA(void* buf, size_t count, bool useTransaction) {
+        // Auto-initialize if not done yet
+        if (!spiInitialized || !dmaInitialized) {
+            setup();
+        }
+        
         if (count > sizeof(adcTxBuffer)) {
             // Handle error - buffer too large
             return;
@@ -400,7 +410,7 @@ private:
         digitalWrite(cs_pin, LOW);
         
         #ifdef __NEW_SHIELD__
-        if (HAL_SPI_TransmitReceive_DMA(&hspi2, adcTxBuffer, adcRxBuffer, count) != HAL_OK) {
+        if (HAL_SPI_TransmitReceive_DMA(&hspi6, adcTxBuffer, adcRxBuffer, count) != HAL_OK) {
         #else
         if (HAL_SPI_TransmitReceive_DMA(&hspi1, adcTxBuffer, adcRxBuffer, count) != HAL_OK) {
         #endif
@@ -449,12 +459,12 @@ extern "C" {
         HAL_DMA_IRQHandler(&PeripheralCommsController::hdma_spi1_rx);
     }
     
-    void DMA1_Stream3_IRQHandler(void) {
-        HAL_DMA_IRQHandler(&PeripheralCommsController::hdma_spi2_tx);
+    void DMA2_Stream1_IRQHandler(void) {
+        HAL_DMA_IRQHandler(&PeripheralCommsController::hdma_spi6_tx);
     }
     
-    void DMA1_Stream4_IRQHandler(void) {
-        HAL_DMA_IRQHandler(&PeripheralCommsController::hdma_spi2_rx);
+    void DMA2_Stream2_IRQHandler(void) {
+        HAL_DMA_IRQHandler(&PeripheralCommsController::hdma_spi6_rx);
     }
 }
 
@@ -463,7 +473,7 @@ extern "C" {
     void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi) {
         if (hspi->Instance == (SPI_TypeDef *)SPI1_BASE) {
             PeripheralCommsController::dacTxCompleteCallback();
-        } else if (hspi->Instance == (SPI_TypeDef *)SPI2_BASE) {
+        } else if (hspi->Instance == (SPI_TypeDef *)SPI6_BASE) {
             PeripheralCommsController::adcTxCompleteCallback();
         }
     }
@@ -471,7 +481,7 @@ extern "C" {
     void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi) {
         if (hspi->Instance == (SPI_TypeDef *)SPI1_BASE) {
             PeripheralCommsController::dacRxCompleteCallback();
-        } else if (hspi->Instance == (SPI_TypeDef *)SPI2_BASE) {
+        } else if (hspi->Instance == (SPI_TypeDef *)SPI6_BASE) {
             PeripheralCommsController::adcRxCompleteCallback();
         }
     }
@@ -480,7 +490,7 @@ extern "C" {
         if (hspi->Instance == (SPI_TypeDef *)SPI1_BASE) {
             PeripheralCommsController::dacTxCompleteCallback();
             PeripheralCommsController::dacRxCompleteCallback();
-        } else if (hspi->Instance == (SPI_TypeDef *)SPI2_BASE) {
+        } else if (hspi->Instance == (SPI_TypeDef *)SPI6_BASE) {
             PeripheralCommsController::adcTxCompleteCallback();
             PeripheralCommsController::adcRxCompleteCallback();
         }
