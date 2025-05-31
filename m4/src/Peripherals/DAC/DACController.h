@@ -76,7 +76,7 @@ class DACController {
     if (voltage < dac_channel.getLowerBound() ||
         voltage > dac_channel.getUpperBound()) {
       return OperationResult::Failure("Voltage out of bounds for DAC " +
-                                      String(channel_index));
+                                      String(channel_index) + " (" + String(voltage) + " V must be between " + String(dac_channel.getLowerBound()) + " and " + String(dac_channel.getUpperBound()) + " V)");
     }
 
     float v = dac_channel.setVoltage(voltage);

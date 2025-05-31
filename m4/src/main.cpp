@@ -43,11 +43,20 @@ void setup() {
   God::setup();
   God2D::setup();
   
-  // wait for calibration data to be loaded
+  // wait for DMA initialization 
   while (!isBootComplete());
+
+  // Wait for calibration data to be sent
+  while (!isCalibrationReady());
 
   CalibrationData calibrationData;
   m4ReceiveCalibrationData(calibrationData);
+
+  // Debug: Show calibration data being applied
+  char debug_msg[200];
+  snprintf(debug_msg, sizeof(debug_msg), "M4: Applying calibration - DAC0: gain=%.6f, offset=%.6f\n", 
+           calibrationData.gain[0], calibrationData.offset[0]);
+  m4SendChar(debug_msg, strlen(debug_msg));
 
   for (int i=0; i<NUM_DAC_CHANNELS; i++) {
     DACController::setCalibration(i, calibrationData.offset[i], calibrationData.gain[i]);

@@ -29,6 +29,7 @@ bool initSharedMemory() {
 
   shared_memory->isCalibrationUpdated = false;
   shared_memory->isBootComplete = false;
+  shared_memory->isCalibrationReady = false;
 
   return true;
 }
@@ -44,7 +45,7 @@ void m4ReceiveCalibrationData(CalibrationData& data) {
 
 void m7SendCalibrationData(const CalibrationData& data) {
   memcpy(&shared_memory->calibrationData, &data, sizeof(CalibrationData));
-  shared_memory->isBootComplete = true;
+  shared_memory->isCalibrationReady = true;
 }
 
 void m7ReceiveCalibrationData(CalibrationData& data) {
@@ -60,6 +61,9 @@ bool isBootComplete() {
   return shared_memory->isBootComplete;
 }
 
+bool isCalibrationReady() {
+  return shared_memory->isCalibrationReady;
+}
 
 // Set/get stop flag
 void setStopFlag(bool value) { shared_memory->stop_flag = value; }
