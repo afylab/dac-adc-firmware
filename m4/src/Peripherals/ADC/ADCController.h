@@ -9,6 +9,7 @@
 #include "Peripherals/ADC/ADCBoard.h"
 #include "Peripherals/OperationResult.h"
 #include "Utils/TimingUtil.h"
+#include "Peripherals/PeripheralCommsController.h"
 
 class ADCController {
  private:
@@ -23,17 +24,14 @@ class ADCController {
   }
 
   inline static void setup() {
-
     #ifdef __NEW_DAC_ADC__
     pinMode(adc_sync, OUTPUT);
     digitalWrite(adc_sync, LOW);
     #endif
 
-
     initializeRegistry();
-    for (auto board : adc_boards) {
+    for (auto& board : adc_boards) {
       board.setup();
-      // int drdy = board.getDataReadyPin();
     }
   }
 

@@ -6,5 +6,6 @@
         "array": "cpp",
         "string": "cpp",
         "string_view": "cpp"
-    }
+    },
+    "r.lsp.promptToInstall": false
 }

@@ -11,6 +11,7 @@
 #include "Peripherals/OperationResult.h"
 #include "Utils/TimingUtil.h"
 #include "Utils/shared_memory.h"
+#include "Peripherals/PeripheralCommsController.h"
 
 class DACController {
  private:
@@ -40,7 +41,7 @@ class DACController {
   }
 
   inline static OperationResult initialize() {
-    for (auto channel : dac_channels) {
+    for (auto& channel : dac_channels) {
       channel.initialize();
     }
     return OperationResult::Success("INITIALIZATION COMPLETE");
@@ -49,8 +50,9 @@ class DACController {
   inline static void setup() {
     pinMode(ldac, OUTPUT);
     digitalWrite(ldac, HIGH);
+    
     initializeRegistry();
-    for (auto channel : dac_channels) {
+    for (auto& channel : dac_channels) {
       channel.setup();
     }
   }
@@ -88,7 +90,7 @@ class DACController {
     if (!isChannelIndexValid(channel_index)) {
       return;
     }
-    DACChannel dac_channel = dac_channels[channel_index];
+    DACChannel& dac_channel = dac_channels[channel_index];
     if (voltage < dac_channel.getLowerBound() ||
         voltage > dac_channel.getUpperBound()) {
       return;
