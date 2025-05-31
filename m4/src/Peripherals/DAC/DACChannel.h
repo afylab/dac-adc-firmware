@@ -79,12 +79,6 @@ class DACChannel {
     this->gain_error = gain;
     voltage_upper_bound = full_scale * gain_error + offset_error;
     voltage_lower_bound = -full_scale * gain_error + offset_error;
-    
-    // Debug: Include shared memory for debug messages
-    char debug_msg[150];
-    snprintf(debug_msg, sizeof(debug_msg), "DAC setCalibration: gain=%.6f, offset=%.6f, bounds=[%.2f, %.2f]\n", 
-             gain, offset, voltage_lower_bound, voltage_upper_bound);
-    m4SendChar(debug_msg, strlen(debug_msg));
   }
 
   void setFullScale(float full_scale) {

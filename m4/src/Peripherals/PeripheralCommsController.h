@@ -47,31 +47,26 @@ class PeripheralCommsController {
   private:
     inline static bool spiInitialized = false;
     inline static bool dmaReady = false;
+    inline static bool useDma = true; // Enable DMA with proper implementation
     int cs_pin;
+
+    // DMA buffers - must be 32-byte aligned for cache coherency
+    static uint8_t __attribute__((aligned(32))) dma_tx_buffer[64];
+    static uint8_t __attribute__((aligned(32))) dma_rx_buffer[64];
 
     // Wait for M7 to initialize DMA (only once)
     static void waitForDmaInit() {
         if (dmaReady) return;
         
-        // Send debug message
-        const char* msg = "M4: Waiting for M7 DMA init...\n";
-        m4SendChar(msg, strlen(msg));
-        
         uint32_t start_time = millis();
         while (!isBootComplete()) {
             delay(1); // Short delay instead of busy wait
             if (millis() - start_time > 3000) { // 3 second timeout
-                const char* timeout_msg = "M4: TIMEOUT waiting for M7 DMA!\n";
-                m4SendChar(timeout_msg, strlen(timeout_msg));
                 return;
             }
         }
         
         dmaReady = true;
-        uint32_t wait_time = millis() - start_time;
-        char time_msg[100];
-        snprintf(time_msg, sizeof(time_msg), "M4: DMA ready after %lu ms\n", wait_time);
-        m4SendChar(time_msg, strlen(time_msg));
     }
 
     // High-performance DMA transfer
@@ -79,13 +74,26 @@ class PeripheralCommsController {
         if (count == 0) return 0;
         
         // Ensure DMA is ready
-        if (!dmaReady) {
-            waitForDmaInit();
-            if (!dmaReady) {
-                // Fallback to blocking SPI if DMA not ready
-                return performFallbackSpi(is_dac, tx_buffer, rx_buffer, count);
-            }
+        if (!useDma || !dmaReady) {
+            return performFallbackSpi(is_dac, tx_buffer, rx_buffer, count);
         }
+        
+        // Use aligned DMA buffers to avoid cache issues
+        if (count > sizeof(dma_tx_buffer)) {
+            // Fallback for large transfers
+            return performFallbackSpi(is_dac, tx_buffer, rx_buffer, count);
+        }
+        
+        // Copy data to aligned DMA buffers
+        if (tx_buffer) {
+            memcpy(dma_tx_buffer, tx_buffer, count);
+        } else {
+            memset(dma_tx_buffer, 0, count);
+        }
+        
+        // Clean cache for TX buffer before DMA
+        SCB_CleanInvalidateDCache_by_Addr(dma_tx_buffer, ((count + 31) / 32) * 32);
+        SCB_InvalidateDCache_by_Addr(dma_rx_buffer, ((count + 31) / 32) * 32);
         
         // Select DMA streams and SPI based on configuration
         DMA_Stream_TypeDef* tx_stream;
@@ -108,17 +116,6 @@ class PeripheralCommsController {
             #endif
         }
         
-        // Cache management for DMA coherency
-        uint32_t tx_addr_aligned = (uint32_t)tx_buffer & ~(CACHE_LINE_SIZE - 1);
-        uint32_t tx_len_aligned = ((count + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
-        SCB_CleanInvalidateDCache_by_Addr((void*)tx_addr_aligned, tx_len_aligned);
-        
-        if (rx_buffer && rx_buffer != tx_buffer) {
-            uint32_t rx_addr_aligned = (uint32_t)rx_buffer & ~(CACHE_LINE_SIZE - 1);
-            uint32_t rx_len_aligned = ((count + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
-            SCB_InvalidateDCache_by_Addr((void*)rx_addr_aligned, rx_len_aligned);
-        }
-        
         // Chip Select LOW
         digitalWrite(cs_pin, LOW);
         
@@ -139,14 +136,14 @@ class PeripheralCommsController {
         
         // Configure RX DMA
         rx_stream->PAR = (uint32_t)&spi_regs->RXDR;
-        rx_stream->M0AR = (uint32_t)(rx_buffer ? rx_buffer : tx_buffer);
+        rx_stream->M0AR = (uint32_t)dma_rx_buffer;
         rx_stream->NDTR = count;
         rx_stream->CR = DMA_SxCR_PL_1 | DMA_SxCR_MINC; // High priority, memory increment
         rx_stream->FCR = 0; // Direct mode
         
         // Configure TX DMA  
         tx_stream->PAR = (uint32_t)&spi_regs->TXDR;
-        tx_stream->M0AR = (uint32_t)tx_buffer;
+        tx_stream->M0AR = (uint32_t)dma_tx_buffer;
         tx_stream->NDTR = count;
         tx_stream->CR = DMA_SxCR_PL_1 | DMA_SxCR_MINC | DMA_SxCR_DIR_0; // High priority, memory increment, mem-to-periph
         tx_stream->FCR = 0; // Direct mode
@@ -162,33 +159,32 @@ class PeripheralCommsController {
         spi_regs->CR1 |= SPI_CR1_SPE;
         spi_regs->CR1 |= SPI_CR1_CSTART;
         
-        // Efficient polling with shorter timeout
-        uint32_t timeout_cycles = count * 10; // Adaptive timeout based on transfer size
-        uint32_t cycles = 0;
-        
-        while ((tx_stream->NDTR > 0 || rx_stream->NDTR > 0) && cycles < timeout_cycles) {
-            cycles++;
-            if (cycles % 100 == 0) {
-                // Check for SPI errors every 100 cycles
-                if (spi_regs->SR & (SPI_SR_OVR | SPI_SR_UDR)) break;
-            }
+        // Wait for transfer completion with timeout
+        uint32_t timeout = 1000; // 1ms timeout per byte
+        while ((tx_stream->NDTR > 0 || rx_stream->NDTR > 0) && timeout > 0) {
+            delayMicroseconds(1);
+            timeout--;
         }
         
         // Quick cleanup
         spi_regs->CR1 &= ~(SPI_CR1_SPE | SPI_CR1_CSTART);
+        spi_regs->CFG1 &= ~(SPI_CFG1_TXDMAEN | SPI_CFG1_RXDMAEN);
         tx_stream->CR &= ~DMA_SxCR_EN;
         rx_stream->CR &= ~DMA_SxCR_EN;
         
         digitalWrite(cs_pin, HIGH);
         
-        // Cache invalidation for received data
+        // Invalidate cache for received data
+        SCB_InvalidateDCache_by_Addr(dma_rx_buffer, ((count + 31) / 32) * 32);
+        
+        // Copy results back
         if (rx_buffer) {
-            uint32_t rx_addr_aligned = (uint32_t)rx_buffer & ~(CACHE_LINE_SIZE - 1);
-            uint32_t rx_len_aligned = ((count + CACHE_LINE_SIZE - 1) / CACHE_LINE_SIZE) * CACHE_LINE_SIZE;
-            SCB_InvalidateDCache_by_Addr((void*)rx_addr_aligned, rx_len_aligned);
+            memcpy(rx_buffer, dma_rx_buffer, count);
+        } else if (tx_buffer) {
+            memcpy(tx_buffer, dma_rx_buffer, count);
         }
         
-        return (count == 1 && rx_buffer) ? rx_buffer[0] : 0;
+        return (count == 1) ? dma_rx_buffer[0] : 0;
     }
     
     // Fallback SPI implementation
@@ -206,6 +202,7 @@ class PeripheralCommsController {
                 if (rx_buffer) rx_buffer[i] = rx_byte;
                 if (tx_buffer && !rx_buffer) tx_buffer[i] = rx_byte;
             }
+            result = rx_buffer ? rx_buffer[0] : (tx_buffer ? tx_buffer[0] : 0);
         }
         
         digitalWrite(cs_pin, HIGH);
@@ -341,3 +338,7 @@ class PeripheralCommsController {
 
   
 };
+
+// Static buffer definitions
+uint8_t PeripheralCommsController::dma_tx_buffer[64] __attribute__((aligned(32)));
+uint8_t PeripheralCommsController::dma_rx_buffer[64] __attribute__((aligned(32)));

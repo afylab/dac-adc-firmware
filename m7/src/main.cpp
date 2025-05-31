@@ -159,20 +159,9 @@ void setup()
       calibrationData.gain[i] = 1.0f;
       calibrationData.offset[i] = 0.0f;
     }
-    // Debug: Show default values being set
-    Serial.print("M7: Set default calibration - DAC0: gain=");
-    Serial.print(calibrationData.gain[0], 6);
-    Serial.print(", offset=");
-    Serial.println(calibrationData.offset[0], 6);
   }
   else
   {
-    // Debug: Show values read from flash
-    Serial.print("M7: Read from flash - DAC0: gain=");
-    Serial.print(calibrationData.gain[0], 6);
-    Serial.print(", offset=");
-    Serial.println(calibrationData.offset[0], 6);
-    
     // Validate calibration data and fix if corrupted
     bool calibration_corrupted = false;
     for (size_t i = 0; i < NUM_DAC_CHANNELS; ++i)
@@ -180,11 +169,6 @@ void setup()
       // Check if gain is outside reasonable range [0.5, 1.5]
       if (calibrationData.gain[i] < 0.5f || calibrationData.gain[i] > 1.5f)
       {
-        Serial.print("M7: Corrupted gain detected for DAC");
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(calibrationData.gain[i], 6);
-        Serial.println(" - resetting to 1.0");
         calibrationData.gain[i] = 1.0f;
         calibration_corrupted = true;
       }
@@ -192,11 +176,6 @@ void setup()
       // Check if offset is outside reasonable range [-1.0, 1.0]
       if (calibrationData.offset[i] < -1.0f || calibrationData.offset[i] > 1.0f)
       {
-        Serial.print("M7: Corrupted offset detected for DAC");
-        Serial.print(i);
-        Serial.print(": ");
-        Serial.print(calibrationData.offset[i], 6);
-        Serial.println(" - resetting to 0.0");
         calibrationData.offset[i] = 0.0f;
         calibration_corrupted = true;
       }
@@ -204,23 +183,11 @@ void setup()
     
     if (calibration_corrupted)
     {
-      Serial.print("M7: Fixed calibration - DAC0: gain=");
-      Serial.print(calibrationData.gain[0], 6);
-      Serial.print(", offset=");
-      Serial.println(calibrationData.offset[0], 6);
+      Serial.println("Calibration data was corrupted and has been reset to defaults.");
     }
   }
 
   initDmaForM4();
-
-  // Send calibration data AFTER DMA is initialized to ensure proper timing
-  
-  // Debug: Show calibration data just before sending
-  Serial.print("M7: About to send - DAC0: gain=");
-  Serial.print(calibrationData.gain[0], 6);
-  Serial.print(", offset=");
-  Serial.println(calibrationData.offset[0], 6);
-  
   m7SendCalibrationData(calibrationData);
 }
 
