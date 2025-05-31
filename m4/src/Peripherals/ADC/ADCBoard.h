@@ -139,7 +139,7 @@ class ADCBoard {
 
   // return ADC status register, pg. 16
   uint8_t getADCStatus() {
-    byte data[2];
+    byte data[2] = {0, 0};
     data[0] = READ | ADDR_ADCSTATUS;
 
     commsController.transferADC(data, 2);
@@ -219,7 +219,7 @@ class ADCBoard {
   }
 
   uint32_t getConversionData(int adc_channel) {
-    byte data[4];
+    byte data[4] = {0, 0, 0, 0};
     data[0] = READ | ADDR_CHANNELDATA(adc_channel);
 
     commsController.transferADC(data, 4);
@@ -338,12 +338,17 @@ class ADCBoard {
     return getConversionTime(channel, moreThanOneChannelActive);
   }
 
+  float setConversionTimeFW(int channel, int filter_word) {
+    return setConversionTime(channel, true, filter_word,
+                            isMoreThanOneChannelActive());
+  }
+
   float getConversionTime(int channel) {
     return getConversionTime(channel, isMoreThanOneChannelActive());
   }
 
   float getConversionTime(int channel, bool moreThanOneChannelActive) {
-    byte data[2];
+    byte data[2] = {0, 0};
     data[0] = READ | ADDR_CHANNELCONVERSIONTIME(channel);
     commsController.transferADC(data, 2);
 

@@ -46,6 +46,7 @@ class ADCController {
   static void initializeRegistry() {
     registerMemberFunction(readChannelVoltage, "GET_ADC");
     registerMemberFunction(setConversionTime, "CONVERT_TIME");
+    registerMemberFunction(setConversionTimeFW, "CONVERT_TIME_FW");
     registerMemberFunction(getConversionTime, "GET_CONVERT_TIME");
     registerMemberFunction(continuousConvertRead,
                                "CONTINUOUS_CONVERT_READ");
@@ -59,6 +60,8 @@ class ADCController {
     registerMemberFunction(adcChannelSystemFullScaleCal,
                                "ADC_CH_FULL_SC_CAL");
     registerMemberFunctionVector(timeSeriesAdcRead, "TIME_SERIES_ADC_READ");
+    registerMemberFunction(setRDYFN, "SET_RDYFN");
+    registerMemberFunction(unsetRDYFN, "UNSET_RDYFN");
   }
 
   inline static void addBoard(int cs_pin, int data_ready,
@@ -184,15 +187,17 @@ class ADCController {
 
   //Sets the RDYFN bit in the IO register to 1
   //This ensures the RDY pin goes low once all ADCs cycle through their conversion process in continuous read mode
-  inline static void setRDYFN(int adc_channel) {
+  inline static OperationResult setRDYFN(int adc_channel) {
     adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].setRDYFN();
+    return OperationResult::Success("Set RDYFN");
   }
 
   //unsets the RDYFN bit in the IO register to 1
   //This ensures the RDY pin goes low once all ADCs cycle through their conversion process in continuous read mode
   //This needs to be done after fininshing a buffer ramp to take the ADC out of continuous conversion mode
-  inline static void unsetRDYFN(int adc_channel) {
+  inline static OperationResult unsetRDYFN(int adc_channel) {
     adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].unsetRDYFN();
+    return OperationResult::Success("Unset RDYFN");
   }
 
   inline static double getVoltageData(int adc_channel) {
@@ -315,6 +320,20 @@ class ADCController {
     float setpoint =
         adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].setConversionTime(
             getChannelIndexFromGlobalIndex(adc_channel), time_us);
+    if (setpoint == -1.0) {
+      return OperationResult::Failure(
+          "The filter word you selected is not valid.");
+    }
+    return OperationResult::Success(String(setpoint, 9));
+  }
+
+  static OperationResult setConversionTimeFW(int adc_channel, int filter_word) {
+    if (!isChannelIndexValid(adc_channel)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
+    float setpoint =
+        adc_boards[getBoardIndexFromGlobalIndex(adc_channel)].setConversionTimeFW(
+            getChannelIndexFromGlobalIndex(adc_channel), filter_word);
     if (setpoint == -1.0) {
       return OperationResult::Failure(
           "The filter word you selected is not valid.");
