@@ -5,6 +5,27 @@
 
 #define NUM_DAC_CHANNELS 16
 
+// Add STM32H7 register access for M7 DMA initialization
+#if defined(ARDUINO_GIGA) || defined(CORE_STM32H7)
+#include "stm32h7xx.h"
+#else
+#error "This code is intended for STM32H7 based boards like Arduino Giga."
+#endif
+
+// DMAMUX Request IDs for SPI
+#define SPI1_TX_DMA 38
+#define SPI1_RX_DMA 37
+#define SPI5_TX_DMA 86
+#define SPI5_RX_DMA 85
+
+// Fallback definitions if not available in headers
+#ifndef RCC_AHB1ENR_DMAMUX1EN
+#define RCC_AHB1ENR_DMAMUX1EN (1U << 2) // Bit 2 in AHB1ENR for DMAMUX1
+#endif
+
+#ifndef RCC_APB1LENR_SPI5EN
+#define RCC_APB1LENR_SPI5EN (1U << 20) // Bit 20 in APB1LENR for SPI5
+#endif
 
 #define return_if_not_ok(x) \
   do                        \
@@ -13,6 +34,55 @@
     if (ret != HAL_OK)      \
       return;               \
   } while (0);
+
+void initDmaForM4() {
+  Serial.println("M7: Initializing DMA for M4 core...");
+  
+  // 1. Enable Clocks for DMA, DMAMUX, SPI1, SPI5
+  RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
+  RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN;
+  SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI1EN);
+  SET_BIT(RCC->APB1LENR, RCC_APB1LENR_SPI5EN);
+  
+  // Ensure clocks are enabled
+  volatile uint32_t dummy_read = RCC->AHB1ENR;
+  (void)dummy_read;
+  delay(1);
+  
+  // 2. Configure DMAMUX for SPI1 (DAC)
+  DMAMUX1_Channel0->CCR = SPI1_TX_DMA; // SPI1 TX -> DMA1 Stream 0
+  DMAMUX1_Channel1->CCR = SPI1_RX_DMA; // SPI1 RX -> DMA1 Stream 1
+  
+  // 3. Configure DMAMUX for SPI5 (ADC on new shield)
+  DMAMUX1_Channel2->CCR = SPI5_TX_DMA; // SPI5 TX -> DMA1 Stream 2  
+  DMAMUX1_Channel3->CCR = SPI5_RX_DMA; // SPI5 RX -> DMA1 Stream 3
+  
+  // 4. Initialize DMA streams (basic setup, M4 will configure per-transfer)
+  // DMA1 Stream 0 (SPI1 TX)
+  DMA1_Stream0->CR &= ~DMA_SxCR_EN;
+  while(DMA1_Stream0->CR & DMA_SxCR_EN);
+  DMA1->LIFCR = 0x3F; // Clear all flags for stream 0
+  
+  // DMA1 Stream 1 (SPI1 RX) 
+  DMA1_Stream1->CR &= ~DMA_SxCR_EN;
+  while(DMA1_Stream1->CR & DMA_SxCR_EN);
+  DMA1->LIFCR = (0x3F << 6); // Clear all flags for stream 1
+  
+  // DMA1 Stream 2 (SPI5 TX)
+  DMA1_Stream2->CR &= ~DMA_SxCR_EN;
+  while(DMA1_Stream2->CR & DMA_SxCR_EN);
+  DMA1->LIFCR = (0x3F << 16); // Clear all flags for stream 2
+  
+  // DMA1 Stream 3 (SPI5 RX)
+  DMA1_Stream3->CR &= ~DMA_SxCR_EN;
+  while(DMA1_Stream3->CR & DMA_SxCR_EN);
+  DMA1->LIFCR = (0x3F << 22); // Clear all flags for stream 3
+  
+  // 5. Set flag in shared memory that DMA is ready
+  shared_memory->isBootComplete = true; // Reuse this flag for DMA ready
+  
+  Serial.println("M7: DMA initialization complete. M4 can now use DMA.");
+}
 
 void enableM4()
 {
@@ -69,6 +139,7 @@ typedef union {
 
 void setup()
 {
+  delay(5000);
   enableM4();
 
   if (!initSharedMemory())
@@ -88,7 +159,68 @@ void setup()
       calibrationData.gain[i] = 1.0f;
       calibrationData.offset[i] = 0.0f;
     }
+    // Debug: Show default values being set
+    Serial.print("M7: Set default calibration - DAC0: gain=");
+    Serial.print(calibrationData.gain[0], 6);
+    Serial.print(", offset=");
+    Serial.println(calibrationData.offset[0], 6);
   }
+  else
+  {
+    // Debug: Show values read from flash
+    Serial.print("M7: Read from flash - DAC0: gain=");
+    Serial.print(calibrationData.gain[0], 6);
+    Serial.print(", offset=");
+    Serial.println(calibrationData.offset[0], 6);
+    
+    // Validate calibration data and fix if corrupted
+    bool calibration_corrupted = false;
+    for (size_t i = 0; i < NUM_DAC_CHANNELS; ++i)
+    {
+      // Check if gain is outside reasonable range [0.5, 1.5]
+      if (calibrationData.gain[i] < 0.5f || calibrationData.gain[i] > 1.5f)
+      {
+        Serial.print("M7: Corrupted gain detected for DAC");
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.print(calibrationData.gain[i], 6);
+        Serial.println(" - resetting to 1.0");
+        calibrationData.gain[i] = 1.0f;
+        calibration_corrupted = true;
+      }
+      
+      // Check if offset is outside reasonable range [-1.0, 1.0]
+      if (calibrationData.offset[i] < -1.0f || calibrationData.offset[i] > 1.0f)
+      {
+        Serial.print("M7: Corrupted offset detected for DAC");
+        Serial.print(i);
+        Serial.print(": ");
+        Serial.print(calibrationData.offset[i], 6);
+        Serial.println(" - resetting to 0.0");
+        calibrationData.offset[i] = 0.0f;
+        calibration_corrupted = true;
+      }
+    }
+    
+    if (calibration_corrupted)
+    {
+      Serial.print("M7: Fixed calibration - DAC0: gain=");
+      Serial.print(calibrationData.gain[0], 6);
+      Serial.print(", offset=");
+      Serial.println(calibrationData.offset[0], 6);
+    }
+  }
+
+  initDmaForM4();
+
+  // Send calibration data AFTER DMA is initialized to ensure proper timing
+  
+  // Debug: Show calibration data just before sending
+  Serial.print("M7: About to send - DAC0: gain=");
+  Serial.print(calibrationData.gain[0], 6);
+  Serial.print(", offset=");
+  Serial.println(calibrationData.offset[0], 6);
+  
   m7SendCalibrationData(calibrationData);
 }
 

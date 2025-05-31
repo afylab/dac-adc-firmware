@@ -37,6 +37,7 @@ struct SharedMemory {
 
   volatile bool isCalibrationUpdated;
   volatile bool isBootComplete;
+  volatile bool isCalibrationReady;
 
   CalibrationData calibrationData;
 };
@@ -52,6 +53,7 @@ void m7SendCalibrationData(const CalibrationData& data);
 void m7ReceiveCalibrationData(CalibrationData& data);
 bool isCalibrationUpdated();
 bool isBootComplete();
+bool isCalibrationReady();
 
 
 void setStopFlag(bool value);
