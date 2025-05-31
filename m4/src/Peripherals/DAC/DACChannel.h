@@ -116,9 +116,9 @@ class DACChannel {
 
   float getVoltage() {
     byte bytesToSend[3] = {144, 0, 0};
-    byte data[3];
+    byte data[3]= {0, 0, 0};
     commsController.transferDAC(bytesToSend, 3);
-    delayMicroseconds(2);
+    // delayMicroseconds(2);
     commsController.transferDAC(data, 3);
 
     float voltage = threeByteToVoltage(data[0], data[1], data[2]);
