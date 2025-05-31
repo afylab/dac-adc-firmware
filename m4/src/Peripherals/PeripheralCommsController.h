@@ -73,17 +73,6 @@ class PeripheralCommsController {
     uint8_t performDmaTransfer(bool is_dac, uint8_t* tx_buffer, uint8_t* rx_buffer, size_t count) {
         if (count == 0) return 0;
         
-        // Ensure DMA is ready
-        if (!useDma || !dmaReady) {
-            return performFallbackSpi(is_dac, tx_buffer, rx_buffer, count);
-        }
-        
-        // Use aligned DMA buffers to avoid cache issues
-        if (count > sizeof(dma_tx_buffer)) {
-            // Fallback for large transfers
-            return performFallbackSpi(is_dac, tx_buffer, rx_buffer, count);
-        }
-        
         // Copy data to aligned DMA buffers
         if (tx_buffer) {
             memcpy(dma_tx_buffer, tx_buffer, count);
@@ -187,28 +176,6 @@ class PeripheralCommsController {
         return (count == 1) ? dma_rx_buffer[0] : 0;
     }
     
-    // Fallback SPI implementation
-    uint8_t performFallbackSpi(bool is_dac, uint8_t* tx_buffer, uint8_t* rx_buffer, size_t count) {
-        digitalWrite(cs_pin, LOW);
-        
-        uint8_t result = 0;
-        if (count == 1) {
-            result = SPI.transfer(tx_buffer ? tx_buffer[0] : 0);
-            if (rx_buffer) rx_buffer[0] = result;
-        } else {
-            for (size_t i = 0; i < count; i++) {
-                uint8_t tx_byte = tx_buffer ? tx_buffer[i] : 0;
-                uint8_t rx_byte = SPI.transfer(tx_byte);
-                if (rx_buffer) rx_buffer[i] = rx_byte;
-                if (tx_buffer && !rx_buffer) tx_buffer[i] = rx_byte;
-            }
-            result = rx_buffer ? rx_buffer[0] : (tx_buffer ? tx_buffer[0] : 0);
-        }
-        
-        digitalWrite(cs_pin, HIGH);
-        return result;
-    }
-
   public:
       PeripheralCommsController(int cs_pin) : cs_pin(cs_pin) {
         pinMode(cs_pin, OUTPUT);
