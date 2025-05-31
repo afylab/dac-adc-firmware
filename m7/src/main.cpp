@@ -62,9 +62,9 @@ void enableM4()
 }
 
 typedef union {
-  double floatingDoublePoint;
-  byte binary[8];
-} binaryDouble;
+  float floatingPoint;
+  byte binary[4];
+} binaryFloat;
 
 
 void setup()
@@ -145,9 +145,9 @@ void loop()
     {
       for (size_t i = 0; i < size; ++i)
       {
-        binaryDouble send;
-        send.floatingDoublePoint = response[i];
-        Serial.write(send.binary, 8);
+        binaryFloat send;
+        send.floatingPoint = static_cast<float>(response[i]);
+        Serial.write(send.binary, 4);
         // Serial.println(response[i], 8);
       }
     }

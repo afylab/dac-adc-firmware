@@ -428,11 +428,11 @@ class God {
         #endif
         m4SendVoltage(packets, numAdcChannels);
 
-        int diff = TimingUtil::dacIncrements - x;
-        if (diff < 0) diff = -diff;
-        if (diff > maxDiff) {
-          maxDiff = diff;
-        }
+        // int diff = TimingUtil::dacIncrements - x;
+        // if (diff < 0) diff = -diff;
+        // if (diff > maxDiff) {
+        //   maxDiff = diff;
+        // }
 
         TimingUtil::adcFlag = 0;
       }
@@ -440,17 +440,18 @@ class God {
 
     TimingUtil::disableDacInterrupt();
     TimingUtil::disableAdcInterrupt();
+    TimingUtil::dacIncrements = 0;
 
     for (int i = 0; i < numAdcChannels; i++) {
       ADCController::idleMode(adcChannels[i]);
       #ifdef __NEW_DAC_ADC__
-      ADCController::setRDYFN(adcChannels[i]);
+      ADCController::unsetRDYFN(adcChannels[i]);
       #endif
     }
 
     #ifdef __NEW_DAC_ADC__
-    for (int i = 0; i < 2; i++) {
-      detachInterrupt(digitalPinToInterrupt(drdy[i]));
+    for (int i = 0; i < numAdcBoards; i++) {
+      detachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boards[i])));
     }
     #endif
 
