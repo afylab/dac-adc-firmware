@@ -21,13 +21,13 @@ const static SPISettings DAC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE1);
 const static SPISettings ADC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 #else
 #warning "NEW_SHIELD is active"
-#define NUM_ADC_BOARDS 4
+#define NUM_ADC_BOARDS 2
 #define NUM_DAC_CHANNELS 16
-const int adc_cs_pins[NUM_ADC_BOARDS] = {39,40,41,42};
+const int adc_cs_pins[NUM_ADC_BOARDS] = {39,40};//,41,42};
 const int dac_cs_pins[NUM_DAC_CHANNELS] = {23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38};
 #define ldac 22
-const int reset[NUM_ADC_BOARDS] = {43,44,45,46};
-const int drdy[NUM_ADC_BOARDS] = {47,48,49,50};
+const int reset[NUM_ADC_BOARDS] = {43,44};//,45,46};
+const int drdy[NUM_ADC_BOARDS] = {47,48};//,49,50};
 
 #ifdef __NEW_DAC_ADC__
 #define adc_sync 51

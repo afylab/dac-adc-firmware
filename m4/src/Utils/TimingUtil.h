@@ -6,7 +6,6 @@
 struct TimingUtil {
   inline static volatile uint8_t adcFlag = 8;
   inline static volatile bool dacFlag = false;
-  inline static volatile int dacIncrements = 0;
 
   inline static void resetTimers() {
     // Disable all interrupts
@@ -33,7 +32,6 @@ struct TimingUtil {
     // Reset flags
     adcFlag = 0;
     dacFlag = false;
-    dacIncrements = 0;
 
     // Re-enable interrupts
     __enable_irq();
@@ -247,6 +245,7 @@ struct TimingUtil {
   inline static void adcSyncISR() {
     adcFlag |= 1 << boardIndex;
     digitalWrite(adc_sync, LOW);
+    __SEV();
   }
   #endif
 };
@@ -256,8 +255,8 @@ extern "C" void TIM1_UP_IRQHandler(void) {
     TIM1->SR &= ~TIM_SR_UIF;
     digitalWrite(ldac, LOW);
     digitalWrite(ldac, HIGH);
-    TimingUtil::dacIncrements++;
     TimingUtil::dacFlag = true;
+    __SEV();
   }
 }
 
@@ -268,6 +267,7 @@ extern "C" void TIM8_UP_TIM13_IRQHandler(void) {
     digitalWrite(adc_sync, HIGH);
     #else
     TimingUtil::adcFlag = 1;
+    __SEV();
     #endif
   }
 }
@@ -279,6 +279,7 @@ extern "C" void TIM8_CC_IRQHandler(void) {
     digitalWrite(adc_sync, HIGH);
     #else
     TimingUtil::adcFlag = 1;
+    __SEV();
     #endif
   }
 }
