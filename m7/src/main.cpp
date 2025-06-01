@@ -139,7 +139,6 @@ typedef union {
 
 void setup()
 {
-  delay(5000);
   enableM4();
 
   if (!initSharedMemory())

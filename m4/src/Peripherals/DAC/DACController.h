@@ -133,6 +133,17 @@ class DACController {
     }
 
     dac_channels[channel_index].setCalibration(offset, gain);
+    CalibrationData calibrationData = getCalibrationData();
+    m4SendCalibrationData(calibrationData);
+  }
+
+  inline static CalibrationData getCalibrationData() {
+    CalibrationData calibrationData;
+    for (int i = 0; i < NUM_DAC_CHANNELS; i++) {
+      calibrationData.offset[i] = dac_channels[i].getOffsetError();
+      calibrationData.gain[i] = dac_channels[i].getGainError();
+    }
+    return calibrationData;
   }
 
   inline static float getLowerBound(int channel) {
