@@ -5,14 +5,12 @@
 #include "Config.h"
 #include "Utils/shared_memory.h"
 
-// Required for STM32H7xx register definitions
 #if defined(ARDUINO_GIGA) || defined(CORE_STM32H7)
 #include "stm32h7xx.h"
 #else
-#error "This code is intended for STM32H7 based boards like Arduino Giga."
+#error "This code is intended for STM32H7 based boards like the Arduino Giga."
 #endif
 
-// Cache line size for STM32H7
 #define CACHE_LINE_SIZE 32
 
 // Fallback definitions if not available
@@ -234,7 +232,6 @@ class PeripheralCommsController {
           SPI.begin();
           spiInitialized = true;
           
-          // Initialize DMA on first setup
           waitForDmaInit();
         }
       }
@@ -264,27 +261,19 @@ class PeripheralCommsController {
       }
 
       void transferDACNoTransaction(void* buf, size_t count) {
-        SPI.beginTransaction(DAC_SPI_SETTINGS);
         performDmaTransfer(true, (uint8_t*)buf, (uint8_t*)buf, count);
-        SPI.endTransaction();
       }
       void transferADCNoTransaction(void* buf, size_t count) {
-        SPI.beginTransaction(ADC_SPI_SETTINGS);
         performDmaTransfer(false, (uint8_t*)buf, (uint8_t*)buf, count);
-        SPI.endTransaction();
       }
       uint8_t transferDACNoTransaction(uint8_t data) {
-        SPI.beginTransaction(DAC_SPI_SETTINGS);
         uint8_t tx_byte = data;
         uint8_t result = performDmaTransfer(true, &tx_byte, &tx_byte, 1);
-        SPI.endTransaction();
         return result;
       }
       uint8_t transferADCNoTransaction(uint8_t data) {
-        SPI.beginTransaction(ADC_SPI_SETTINGS);
         uint8_t tx_byte = data;
         uint8_t result = performDmaTransfer(false, &tx_byte, &tx_byte, 1);
-        SPI.endTransaction();
         return result;
       }
 
@@ -306,6 +295,5 @@ class PeripheralCommsController {
   
 };
 
-// Static buffer definitions
 uint8_t PeripheralCommsController::dma_tx_buffer[64] __attribute__((aligned(32)));
 uint8_t PeripheralCommsController::dma_rx_buffer[64] __attribute__((aligned(32)));
