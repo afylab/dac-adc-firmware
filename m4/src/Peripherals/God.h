@@ -377,6 +377,8 @@ class God {
     }
     DACController::toggleLdac();
 
+    delayMicroseconds(dac_settling_time_us);
+
     for (int i = 0; i < numAdcChannels; i++) {
       ADCController::startContinuousConversion(adcChannels[i]);
       #ifdef __NEW_DAC_ADC__
@@ -392,12 +394,15 @@ class God {
 
     x = 0;
     int diff = 0;
+    float cycles = 0.0;
+    // int numSteps2 = numSteps - 1;
 
     uint32_t start = DWT->CYCCNT;
     while (x < numSteps && !getStopFlag()) {
       __WFE();
       if (TimingUtil::dacFlag && ++dacIncrements < numSteps) {
-        float cycles =  static_cast<float>(DWT->CYCCNT - start);
+        // cycles =  static_cast<float>(DWT->CYCCNT - start);
+        // m4SendFloat(&cycles, 1); // send cycles for debugging
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::beginDacTransaction();
         #endif
@@ -405,6 +410,7 @@ class God {
           DACController::setVoltageNoTransactionNoLdac(dacChannels[i], nextVoltageSet[i]);
           nextVoltageSet[i] += voltageStepSize[i];
         }
+        DACController::toggleLdac();
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::endTransaction();
         #endif
@@ -414,11 +420,13 @@ class God {
         // float data[2] = { static_cast<float>(dacIncrements), static_cast<float>(x)};
         
         // m4SendFloat(data, 2); // send cycles for debugging
-        m4SendFloat(&cycles, 1); // send cycles for debugging
+        // cycles =  static_cast<float>(DWT->CYCCNT - start);
+        // m4SendFloat(&cycles, 1); // send cycles for debugging
       }
       if (TimingUtil::adcFlag == adcMask) {
         // uint32_t start = DWT->CYCCNT;
-        float cycles =  -1.0 * static_cast<float>(DWT->CYCCNT - start);
+        // cycles =  -1.0 * static_cast<float>(DWT->CYCCNT - start);
+        // m4SendFloat(&cycles, 1); // send cycles for debugging
         x++;
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::beginAdcTransaction();
@@ -433,19 +441,19 @@ class God {
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::endTransaction();
         #endif
-        // m4SendVoltage(packets, numAdcChannels);
+        m4SendVoltage(packets, numAdcChannels);
 
-        // diff = dacIncrements - x;
-        // if (diff < 0) diff = -diff;
-        // if (diff > maxDiff) {
-        //   maxDiff = diff;
-        // }
+        diff = dacIncrements - x;
+        if (diff < 0) diff = -diff;
+        if (diff > maxDiff) {
+          maxDiff = diff;
+        }
 
         TimingUtil::adcFlag = 0;
         
         // float data[2] = { static_cast<float>(dacIncrements), static_cast<float>(x)};
-        
-        m4SendFloat(&cycles, 1); // send cycles for debugging
+        // cycles =  -1.0 * static_cast<float>(DWT->CYCCNT - start);
+        // m4SendFloat(&cycles, 1); // send cycles for debugging
       }
     }
 

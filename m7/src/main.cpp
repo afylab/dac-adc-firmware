@@ -36,7 +36,7 @@
   } while (0);
 
 void initDmaForM4() {
-  Serial.println("M7: Initializing DMA for M4 core...");
+  // Serial.println("M7: Initializing DMA for M4 core...");
   
   // 1. Enable Clocks for DMA, DMAMUX, SPI1, SPI5
   RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
@@ -81,7 +81,7 @@ void initDmaForM4() {
   // 5. Set flag in shared memory that DMA is ready
   shared_memory->isBootComplete = true; // Reuse this flag for DMA ready
   
-  Serial.println("M7: DMA initialization complete. M4 can now use DMA.");
+  // Serial.println("M7: DMA initialization complete. M4 can now use DMA.");
 }
 
 void enableM4()
