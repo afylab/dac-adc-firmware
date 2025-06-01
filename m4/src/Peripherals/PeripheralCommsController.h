@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "SPI.h"
 #include "Config.h"
 #include "Utils/shared_memory.h"
 
@@ -33,23 +34,6 @@ static inline void fallback_cache_invalidate(void* addr, size_t size) {
 #define SCB_InvalidateDCache_by_Addr(addr, size) fallback_cache_invalidate(addr, size)
 #endif
 
-// Fallback definitions if not available in headers
-#ifndef RCC_AHB1ENR_DMAMUX1EN
-#define RCC_AHB1ENR_DMAMUX1EN (1U << 2) // Bit 2 in AHB1ENR for DMAMUX1
-#endif
-
-#ifndef RCC_APB1LENR_SPI5EN
-#define RCC_APB1LENR_SPI5EN (1U << 20) // Bit 20 in APB1LENR for SPI5
-#endif
-
-#ifndef RCC_AHB4ENR_GPIOAEN
-#define RCC_AHB4ENR_GPIOAEN (1U << 0) // Bit 0 in AHB4ENR for GPIOA
-#endif
-
-#ifndef RCC_AHB4ENR_GPIOFEN
-#define RCC_AHB4ENR_GPIOFEN (1U << 5) // Bit 5 in AHB4ENR for GPIOF
-#endif
-
 // SPI base addresses (fallback if not defined)
 #ifndef SPI1_BASE
 #define SPI1_BASE 0x40013000UL
@@ -69,75 +53,6 @@ class PeripheralCommsController {
     // DMA buffers - must be 32-byte aligned for cache coherency
     static uint8_t __attribute__((aligned(32))) dma_tx_buffer[64];
     static uint8_t __attribute__((aligned(32))) dma_rx_buffer[64];
-
-    // Low-level SPI initialization without Arduino library
-    static void initializeSpiHardware() {
-        // Enable clocks for SPI peripherals
-        SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI1EN);   // Enable SPI1 clock
-        #ifdef __NEW_SHIELD__
-        SET_BIT(RCC->APB1LENR, RCC_APB1LENR_SPI5EN); // Enable SPI5 clock
-        #endif
-        
-        // Enable GPIO clocks (GPIOA for SPI1, GPIOF for SPI5)
-        SET_BIT(RCC->AHB4ENR, RCC_AHB4ENR_GPIOAEN);
-        #ifdef __NEW_SHIELD__
-        SET_BIT(RCC->AHB4ENR, RCC_AHB4ENR_GPIOFEN);
-        #endif
-        
-        // Configure SPI1 GPIO pins (PA5=SCK, PA6=MISO, PA7=MOSI)
-        // Set alternate function mode (AF5 for SPI1)
-        GPIOA->MODER &= ~((3UL << 10) | (3UL << 12) | (3UL << 14)); // Clear bits
-        GPIOA->MODER |= (2UL << 10) | (2UL << 12) | (2UL << 14);    // Set AF mode
-        GPIOA->AFR[0] &= ~((15UL << 20) | (15UL << 24) | (15UL << 28)); // Clear AF
-        GPIOA->AFR[0] |= (5UL << 20) | (5UL << 24) | (5UL << 28);   // Set AF5
-        GPIOA->OSPEEDR |= (3UL << 10) | (3UL << 12) | (3UL << 14);  // High speed
-        
-        #ifdef __NEW_SHIELD__
-        // Configure SPI5 GPIO pins (PF7=SCK, PF8=MISO, PF9=MOSI)
-        // Set alternate function mode (AF5 for SPI5)
-        GPIOF->MODER &= ~((3UL << 14) | (3UL << 16) | (3UL << 18)); // Clear bits
-        GPIOF->MODER |= (2UL << 14) | (2UL << 16) | (2UL << 18);    // Set AF mode
-        GPIOF->AFR[0] &= ~(15UL << 28);                              // Clear AF for PF7
-        GPIOF->AFR[0] |= (5UL << 28);                                // Set AF5 for PF7
-        GPIOF->AFR[1] &= ~((15UL << 0) | (15UL << 4));              // Clear AF for PF8,PF9
-        GPIOF->AFR[1] |= (5UL << 0) | (5UL << 4);                   // Set AF5 for PF8,PF9
-        GPIOF->OSPEEDR |= (3UL << 14) | (3UL << 16) | (3UL << 18);  // High speed
-        #endif
-        
-        // Configure SPI1 registers
-        SPI_TypeDef* spi1 = (SPI_TypeDef*)SPI1_BASE;
-        spi1->CR1 = 0; // Reset
-        spi1->CFG1 = 0; // Reset
-        spi1->CFG2 = 0; // Reset
-        
-        // CFG1: 8-bit data, prescaler /32 (for ~5MHz from 160MHz clock)
-        spi1->CFG1 = (7 << SPI_CFG1_DSIZE_Pos) |  // 8-bit data size
-                     (4 << SPI_CFG1_MBR_Pos);      // Prescaler /32
-        
-        // CFG2: Master mode, software CS, MSB first
-        spi1->CFG2 = SPI_CFG2_MASTER | SPI_CFG2_SSM | SPI_CFG2_SSOE;
-        
-        // CR1: Enable SPI 
-        spi1->CR1 = SPI_CR1_SPE;
-        
-        #ifdef __NEW_SHIELD__
-        // Configure SPI5 registers (similar to SPI1)
-        SPI_TypeDef* spi5 = (SPI_TypeDef*)SPI5_BASE;
-        spi5->CR1 = 0; // Reset
-        spi5->CFG1 = 0; // Reset  
-        spi5->CFG2 = 0; // Reset
-        
-        // CFG1: 8-bit data, prescaler /32
-        spi5->CFG1 = (7 << SPI_CFG1_DSIZE_Pos) |  // 8-bit data size
-                     (4 << SPI_CFG1_MBR_Pos);      // Prescaler /32
-        
-        // CFG2: Master mode, software CS, MSB first
-        spi5->CFG2 = SPI_CFG2_MASTER | SPI_CFG2_SSM | SPI_CFG2_SSOE;
-        
-        // CR1: Enable SPI
-        spi5->CR1 = SPI_CR1_SPE;
-        #endif
-    }
 
     // Wait for M7 to initialize DMA (only once)
     static void waitForDmaInit() {
@@ -270,8 +185,11 @@ class PeripheralCommsController {
       #ifdef __NEW_SHIELD__
       static void setup() {
         if (!spiInitialized) {
-          initializeSpiHardware();
+          SPI.begin();
+          SPI.beginTransaction(DAC_SPI_SETTINGS);
           spiInitialized = true;
+          SPI1.begin();
+          SPI1.beginTransaction(ADC_SPI_SETTINGS);
           
           // Initialize DMA on first setup
           waitForDmaInit();
@@ -313,7 +231,7 @@ class PeripheralCommsController {
       #else
       static void setup() {
         if (!spiInitialized) {
-          initializeSpiHardware();
+          SPI.begin();
           spiInitialized = true;
           
           // Initialize DMA on first setup
@@ -321,37 +239,61 @@ class PeripheralCommsController {
         }
       }
       void transferDAC(void* buf, size_t count) {
+        SPI.beginTransaction(DAC_SPI_SETTINGS);
         performDmaTransfer(true, (uint8_t*)buf, (uint8_t*)buf, count);
+        SPI.endTransaction();
       }
       void transferADC(void* buf, size_t count) {
+        SPI.beginTransaction(ADC_SPI_SETTINGS);
         performDmaTransfer(false, (uint8_t*)buf, (uint8_t*)buf, count);
+        SPI.endTransaction();
       }
       uint8_t transferDAC(uint8_t data) {
+        SPI.beginTransaction(DAC_SPI_SETTINGS);
         uint8_t tx_byte = data;
-        return performDmaTransfer(true, &tx_byte, &tx_byte, 1);
+        uint8_t result = performDmaTransfer(true, &tx_byte, &tx_byte, 1);
+        SPI.endTransaction();
+        return result;
       }
       uint8_t transferADC(uint8_t data) {
+        SPI.beginTransaction(ADC_SPI_SETTINGS);
         uint8_t tx_byte = data;
-        return performDmaTransfer(false, &tx_byte, &tx_byte, 1);
+        uint8_t result = performDmaTransfer(false, &tx_byte, &tx_byte, 1);
+        SPI.endTransaction();
+        return result;
       }
 
       void transferDACNoTransaction(void* buf, size_t count) {
+        SPI.beginTransaction(DAC_SPI_SETTINGS);
         performDmaTransfer(true, (uint8_t*)buf, (uint8_t*)buf, count);
+        SPI.endTransaction();
       }
       void transferADCNoTransaction(void* buf, size_t count) {
+        SPI.beginTransaction(ADC_SPI_SETTINGS);
         performDmaTransfer(false, (uint8_t*)buf, (uint8_t*)buf, count);
+        SPI.endTransaction();
       }
       uint8_t transferDACNoTransaction(uint8_t data) {
+        SPI.beginTransaction(DAC_SPI_SETTINGS);
         uint8_t tx_byte = data;
-        return performDmaTransfer(true, &tx_byte, &tx_byte, 1);
+        uint8_t result = performDmaTransfer(true, &tx_byte, &tx_byte, 1);
+        SPI.endTransaction();
+        return result;
       }
       uint8_t transferADCNoTransaction(uint8_t data) {
+        SPI.beginTransaction(ADC_SPI_SETTINGS);
         uint8_t tx_byte = data;
-        return performDmaTransfer(false, &tx_byte, &tx_byte, 1);
+        uint8_t result = performDmaTransfer(false, &tx_byte, &tx_byte, 1);
+        SPI.endTransaction();
+        return result;
       }
 
-      static void beginDacTransaction() { }
-      static void beginAdcTransaction() { }
+      static void beginDacTransaction() {
+        SPI.beginTransaction(DAC_SPI_SETTINGS);
+      }
+      static void beginAdcTransaction() {
+        SPI.beginTransaction(ADC_SPI_SETTINGS);
+      }
 
       #endif
 
@@ -359,7 +301,7 @@ class PeripheralCommsController {
 
       static void dataLedOff() { /*digitalWrite(led, LOW);*/ }
 
-      static void endTransaction() { }
+      static void endTransaction() { SPI.endTransaction(); }
 
   
 };

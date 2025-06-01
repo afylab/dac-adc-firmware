@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <Config.h>
+#include <SPI.h>
 
 #include <vector>
 
