@@ -1,6 +1,5 @@
 #pragma once
 #include <Arduino.h>
-#include <SPI.h>
 
 #define NUM_CHANNELS_PER_DAC_BOARD 4
 #define NUM_CHANNELS_PER_ADC_BOARD 4
@@ -17,8 +16,6 @@ const int drdy[NUM_ADC_BOARDS] = {50, 40}; // data_ready pin for both ADCs -- us
 #define led 7 // indicator LED
 #define data_pin 6 // data indicator LED
 #define err 11 // error indicator LED
-const static SPISettings DAC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE1);
-const static SPISettings ADC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 #else
 #warning "NEW_SHIELD is active"
 #define NUM_ADC_BOARDS 2
@@ -36,7 +33,5 @@ const int drdy[NUM_ADC_BOARDS] = {47,48};//,49,50};
 #define led 7 // indicator LED
 #define data_pin 6 // data indicator LED
 #define err 11 // error indicator LED
-const static SPISettings DAC_SPI_SETTINGS(20000000, MSBFIRST, SPI_MODE1); 
-const static SPISettings ADC_SPI_SETTINGS(8000000, MSBFIRST, SPI_MODE0);
 #endif
 
