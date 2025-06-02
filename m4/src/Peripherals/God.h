@@ -451,8 +451,9 @@ class God {
         if (diff > maxDiff) {
           maxDiff = diff;
         }
-        
+        #ifdef __NEW_DAC_ADC__
         digitalWrite(adc_sync, LOW);
+        #endif
         TimingUtil::adcFlag = 0;
         
         // float data[2] = { static_cast<float>(dacIncrements), static_cast<float>(x)};
