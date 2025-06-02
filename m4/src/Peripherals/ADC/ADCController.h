@@ -15,11 +15,16 @@ class ADCController {
   inline static std::vector<ADCBoard> adc_boards;
 
  public:
-  inline static OperationResult initialize() {
-    // for (auto channel : adc_channels) {
-    //   channel->initialize();
-    // }
-    return OperationResult::Success();
+  inline static void initialize() {
+    for (auto board : adc_boards) {
+      board.initialize();
+    }
+  }
+
+  inline static void resetToPreviousConversionTimes() {
+    for (auto board : adc_boards) {
+      board.resetToPreviousConversionTimes();
+    }
   }
 
   inline static void setup() {

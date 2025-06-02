@@ -73,6 +73,7 @@ class ADCBoard {
   int cs_pin;
   int data_ready_pin;
   int reset_pin;
+  int conversion_times[NUM_CHANNELS_PER_ADC_BOARD];
   PeripheralCommsController commsController;
 
   void waitDataReady() {
@@ -123,7 +124,19 @@ class ADCBoard {
     setReadyFlag();
   }
 
-  void initialize() {}
+  void initialize() {
+    reset();
+    for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      setConversionTime(i, 500);
+    }
+  }
+
+  void resetToPreviousConversionTimes() {
+    reset();
+    for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      setConversionTime(i, conversion_times[i]);
+    }
+  }
 
   int getDataReadyPin() const { return data_ready_pin; }
 
@@ -331,11 +344,14 @@ class ADCBoard {
 
     commsController.transferADC(data, 2);
 
+    // could've done the calculation with user-given values but it's good to check
+    float time_us = getConversionTime(channel, moreThanOneChannelActive);
+
+    conversion_times[channel] = time_us;
+
     delayMicroseconds(100);
 
-    // could've done the calculation with user-given values but it's good to
-    // check
-    return getConversionTime(channel, moreThanOneChannelActive);
+    return time_us;
   }
 
   float setConversionTimeFW(int channel, int filter_word) {

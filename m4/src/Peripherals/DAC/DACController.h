@@ -18,10 +18,6 @@ class DACController {
 
  public:
   inline static void initializeRegistry() {
-    registerMemberFunction(initialize, "INITIALIZE");
-    registerMemberFunction(initialize, "INIT");
-    registerMemberFunction(
-        initialize, "INNIT");  // oi bruv u got a loicense for that DAC? 🇬🇧
     registerMemberFunction(setVoltage, "SET");
     registerMemberFunction(getVoltage, "GET_DAC");
     registerMemberFunction(sendCode, "SET_DAC_CODE");
@@ -39,11 +35,11 @@ class DACController {
     dac_channels.push_back(newChannel);
   }
 
-  inline static OperationResult initialize() {
+  inline static bool initialize() {
     for (auto channel : dac_channels) {
       channel.initialize();
     }
-    return OperationResult::Success("INITIALIZATION COMPLETE");
+    return true;
   }
 
   inline static void setup() {

@@ -17,12 +17,21 @@ class God {
   static void setup() { initializeRegistry(); }
 
   static void initializeRegistry() {
+    registerMemberFunction(initialize, "INITIALIZE");
+    registerMemberFunction(initialize, "INIT");
+    registerMemberFunction(initialize, "INNIT");
     registerMemberFunctionVector(timeSeriesBufferRampWrapper,
                                  "TIME_SERIES_BUFFER_RAMP");
     registerMemberFunctionVector(dacLedBufferRampWrapper,
                                  "DAC_LED_BUFFER_RAMP");
     registerMemberFunction(dacChannelCalibration, "DAC_CH_CAL");
     registerMemberFunctionVector(boxcarAverageRamp, "BOXCAR_BUFFER_RAMP");
+  }
+
+  inline static OperationResult initialize() {
+    DACController::initialize();
+    ADCController::initialize();
+    return OperationResult::Success("INITIALIZATION COMPLETE");
   }
 
 
@@ -328,6 +337,8 @@ class God {
     setStopFlag(false);
     PeripheralCommsController::dataLedOn();
 
+    ADCController::resetToPreviousConversionTimes();
+
     #ifdef __NEW_DAC_ADC__
     digitalWrite(adc_sync, LOW);
 
@@ -472,6 +483,8 @@ class God {
       detachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boards[i])));
     }
     #endif
+
+    ADCController::resetToPreviousConversionTimes();
 
     PeripheralCommsController::dataLedOff();
 
