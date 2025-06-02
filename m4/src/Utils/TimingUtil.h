@@ -4,7 +4,7 @@
 #include "Config.h"
 
 struct TimingUtil {
-  inline static volatile uint8_t adcFlag = 8;
+  inline static volatile uint8_t adcFlag = 0;
   inline static volatile bool dacFlag = false;
 
   inline static void resetTimers() {
@@ -244,7 +244,7 @@ struct TimingUtil {
   template<int boardIndex>
   inline static void adcSyncISR() {
     adcFlag |= 1 << boardIndex;
-    digitalWrite(adc_sync, LOW);
+    //digitalWrite(adc_sync, LOW);
     __SEV();
   }
   #endif

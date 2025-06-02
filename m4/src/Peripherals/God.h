@@ -337,6 +337,9 @@ class God {
     setStopFlag(false);
     PeripheralCommsController::dataLedOn();
 
+    TimingUtil::dacFlag = false;
+    TimingUtil::adcFlag = 0;
+
     ADCController::resetToPreviousConversionTimes();
 
     #ifdef __NEW_DAC_ADC__
@@ -459,7 +462,8 @@ class God {
         if (diff > maxDiff) {
           maxDiff = diff;
         }
-
+        
+        digitalWrite(adc_sync, LOW);
         TimingUtil::adcFlag = 0;
         
         // float data[2] = { static_cast<float>(dacIncrements), static_cast<float>(x)};
@@ -470,6 +474,8 @@ class God {
 
     TimingUtil::disableDacInterrupt();
     TimingUtil::disableAdcInterrupt();
+    TimingUtil::dacFlag = false;
+    TimingUtil::adcFlag = 0;
 
     for (int i = 0; i < numAdcChannels; i++) {
       ADCController::idleMode(adcChannels[i]);
