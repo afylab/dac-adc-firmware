@@ -287,10 +287,10 @@ class ADCBoard {
     delay(5);
     digitalWrite(reset_pin, HIGH);
 
-    commsController.transferADC(0x28);
-    commsController.transferADC(0);
-    commsController.transferADC(0x2A);
-    commsController.transferADC(0);
+    // commsController.transferADC(0x28);
+    // commsController.transferADC(0);
+    // commsController.transferADC(0x2A);
+    // commsController.transferADC(0);
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       idleMode(i);
     }
