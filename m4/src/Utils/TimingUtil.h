@@ -117,7 +117,7 @@ struct TimingUtil {
 
     // Configure TIM1
     TIM1->PSC = psc_dac;
-    TIM1->ARR = arr_adc;
+    TIM1->ARR = arr_dac;
     TIM1->CR1 = TIM_CR1_ARPE;
     TIM1->DIER |= TIM_DIER_UIE;
 

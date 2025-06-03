@@ -110,6 +110,9 @@ class God2D {
           "Sum of fast and slow DAC channels does not match numDacChannels");
     }
 
+    // Reset ADC before starting the ramp
+    ADCController::resetToPreviousConversionTimes();
+
     float voltageStepSize[numDacChannels];
 
     for (int i = 0; i < numDacChannels; i++) {
@@ -190,6 +193,9 @@ class God2D {
         return OperationResult::Failure(ramp2Result.getMessage());
       }
     }
+    
+    // Reset ADC before setting channels to idle mode
+    ADCController::resetToPreviousConversionTimes();
 
     // Set ADC channels to idle mode
     for (int i = 0; i < numAdcChannels; i++) {
@@ -292,13 +298,8 @@ class God2D {
       adcChannels[i] = static_cast<int>(args[currentIndex++]);
     }
 
-    // for (int i = 0; i < numAdcChannels; i++) {
-    //   if (dac_settling_time_us <
-    //       ADCController::getConversionTimeFloat(adcChannels[i])) {
-    //     return OperationResult::Failure(
-    //         "DAC settling time too short for ADC conversion time");
-    //   }
-    // }
+    // Reset ADC before starting the ramp
+    ADCController::resetToPreviousConversionTimes();
 
     // Validate total number of DAC channels
     if (numFastDacChannels + numSlowDacChannels != numDacChannels) {
@@ -384,6 +385,9 @@ class God2D {
         return OperationResult::Failure(ramp2Result.getMessage());
       }
     }
+
+    // Reset ADC before setting channels to idle mode
+    ADCController::resetToPreviousConversionTimes();
 
     // Set ADC channels to idle mode
     for (int i = 0; i < numAdcChannels; i++) {

@@ -143,8 +143,38 @@ class God {
       TimingUtil::adcSyncISR<3>
     };
 
-    BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
+    //prevent user from setting the DAC update rate too fast
+    int adc_usage[4] = {0, 0, 0, 0};
+    for (int i = 0; i < numAdcChannels; ++i) {
+      int ch = adcChannels[i];
+      if (ch < 0) continue;          // skip invalid values
+      uint8_t board = ch / 4;        // 0‑based board index
+      adc_usage[board]++;
+    }
 
+    int max_indep_ADCs = *std::max_element(adc_usage, adc_usage + 4);
+
+    if(max_indep_ADCs <= 0) {
+      return OperationResult::Failure("No ADC channels provided");
+    } else if (max_indep_ADCs == 1) {
+      if (dac_interval_us < 50) {
+        return OperationResult::Failure("DAC interval too short, please increase it");
+      }
+    } else if (max_indep_ADCs == 2) {
+      if (dac_interval_us < 120) {
+        return OperationResult::Failure("DAC interval too short, please increase it");
+      }
+    } else if (max_indep_ADCs == 3) {
+      if (dac_interval_us < 180) {
+        return OperationResult::Failure("DAC interval too short, please increase it");
+      }
+    } else if (max_indep_ADCs == 4) {
+      if (dac_interval_us < 250) {
+          return OperationResult::Failure("DAC interval too short, please increase it");
+      }
+    }
+
+    BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
     int numAdcBoards = boardUsage.numBoards;
     std::vector<uint8_t> adcBoards = boardUsage.idx;
 
@@ -152,6 +182,9 @@ class God {
       attachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(adcBoards[i])), isrFunctions[i], FALLING);
     }
     #endif
+
+    // reset all ADCs before ramp
+    ADCController::resetToPreviousConversionTimes();
 
     uint8_t adcMask = 0u;
     #ifdef __NEW_DAC_ADC__
@@ -190,7 +223,7 @@ class God {
 
     while ((x < saved_data_size || steps < numSteps) && !getStopFlag()) {
       if (TimingUtil::dacFlag && steps < numSteps) {
-        
+        __WFE();
         if (steps < numSteps - 1) {
           #if !defined(__NEW_SHIELD__)
           PeripheralCommsController::beginDacTransaction();
@@ -207,7 +240,7 @@ class God {
         steps++;
         TimingUtil::dacFlag = false;
       }
-      if (TimingUtil::adcFlag == adcMask) {
+      if (TimingUtil::adcFlag == adcMask && x < saved_data_size) {
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::beginAdcTransaction();
         #endif
@@ -219,6 +252,11 @@ class God {
         PeripheralCommsController::endTransaction();
         #endif
         m4SendVoltage(packets, numAdcChannels);
+
+        #ifdef __NEW_DAC_ADC__
+        digitalWrite(adc_sync, LOW);
+        #endif
+
         x++;
         TimingUtil::adcFlag = 0;
       }
@@ -233,6 +271,9 @@ class God {
       ADCController::unsetRDYFN(adcChannels[i]);
       #endif
     }
+
+    // reset all ADCs after ramp
+    ADCController::resetToPreviousConversionTimes();
 
     #ifdef __NEW_DAC_ADC__
     for (int i = 0; i < numAdcBoards; i++) {
@@ -365,6 +406,28 @@ class God {
     std::sort(boards.begin(), boards.end());
 
     int numAdcBoards = boards.size();
+
+    //check to see if buffer ramp is compatible with the current ADC configuration
+    float convTimeSum[4] = {0.0, 0.0, 0.0, 0.0};
+    uint8_t board_num = 0;
+    int chNum = 0;
+    for (int i = 0; i < numAdcChannels; i++) {
+      chNum = adcChannels[i];
+      board_num = chNum / 4; // 0-based board index
+      convTimeSum[board_num] += ADCController::getConversionTimeFloat(adcChannels[i]);
+    }
+    float maxConvTime = *std::max_element(std::begin(convTimeSum), std::end(convTimeSum));
+    if(maxConvTime*numAdcAverages + dac_settling_time_us + 180 >= dac_interval_us) {
+      return OperationResult::Failure("DAC Interval is too short for specified ADC conversion time, please increase it");
+    }
+    //sums up conversion times for each ADC on each board and takes the maximum, if then maxConvTime + settling time + 50us 
+    //is greater than the DAC interval, then the buffer ramp is not compatible with the current ADC configuration
+    //the extra 180us is to account for any additional timing delays
+
+    //We will also throw an error if the settling time is too short:
+    if (dac_settling_time_us < 100) {
+      return OperationResult::Failure("DAC settling time is too short, please increase it");
+    }
 
     for (int i = 0; i < numAdcBoards; i++) {
       attachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boards[i])), isrFunctions[i], FALLING);
