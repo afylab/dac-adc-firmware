@@ -471,10 +471,10 @@ class God {
 
     x = 0;
     int diff = 0;
-    float cycles = 0.0;
-    // int numSteps2 = numSteps - 1;
+    
+    // float cycles = 0.0;
+    // uint32_t start = DWT->CYCCNT;
 
-    uint32_t start = DWT->CYCCNT;
     while (x < numSteps && !getStopFlag()) {
       __WFE();
       if (TimingUtil::dacFlag && ++dacIncrements < numSteps) {
@@ -496,14 +496,14 @@ class God {
 
         // float data[2] = { static_cast<float>(dacIncrements), static_cast<float>(x)};
         
-        // m4SendFloat(data, 2); // send cycles for debugging
+        // m4SendFloat(data, 2);
         // cycles =  static_cast<float>(DWT->CYCCNT - start);
-        // m4SendFloat(&cycles, 1); // send cycles for debugging
+        // m4SendFloat(&cycles, 1);
       }
       if (TimingUtil::adcFlag == adcMask) {
         // uint32_t start = DWT->CYCCNT;
         // cycles =  -1.0 * static_cast<float>(DWT->CYCCNT - start);
-        // m4SendFloat(&cycles, 1); // send cycles for debugging
+        // m4SendFloat(&cycles, 1);
         x++;
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::beginAdcTransaction();
@@ -532,7 +532,7 @@ class God {
         
         // float data[2] = { static_cast<float>(dacIncrements), static_cast<float>(x)};
         // cycles =  -1.0 * static_cast<float>(DWT->CYCCNT - start);
-        // m4SendFloat(&cycles, 1); // send cycles for debugging
+        // m4SendFloat(&cycles, 1);
       }
     }
 

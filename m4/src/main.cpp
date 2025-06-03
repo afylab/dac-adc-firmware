@@ -25,12 +25,14 @@ void setup() {
     }
   }
 
-  // Enable trace and debug blocks (TRCENA bit in DEMCR)
-  CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
-  // Clear the counter
-  DWT->CYCCNT = 0;
-  // Enable the cycle counter
-  DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+  // timing debug stuff
+  // // Enable trace and debug blocks (TRCENA bit in DEMCR)
+  // CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  // // Clear the counter
+  // DWT->CYCCNT = 0;
+  // // Enable the cycle counter
+  // DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+
   UserIOHandler::setup();
 
   PeripheralCommsController::setup();
