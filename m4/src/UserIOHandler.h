@@ -79,6 +79,14 @@ struct UserIOHandler {
     return endPtr != str.c_str() && *endPtr == '\0' && str.length() > 0;
   }
 
+  ///*************************************************************************///
+  /// handleUserIO is called in the main loop of the M4 processor (see main.cpp)
+  /// The M4 processor cannot directly process information from UART, so in order
+  /// to communicate with user serial input, the M7 takes the serial input and saves
+  /// the command in a shared memory buffer.  Conversely, when the M4 needs to 
+  /// communicate with the M7, it stores data in the shared SRAM buffer.
+  ///*************************************************************************///
+
   static void handleUserIO() {
     std::vector<String> comm;
     if (m4HasCharMessage()) {

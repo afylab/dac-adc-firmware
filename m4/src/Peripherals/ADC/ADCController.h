@@ -69,6 +69,11 @@ class ADCController {
     registerMemberFunctionVector(timeSeriesAdcRead, "TIME_SERIES_ADC_READ");
     registerMemberFunction(setRDYFN, "SET_RDYFN");
     registerMemberFunction(unsetRDYFN, "UNSET_RDYFN");
+    registerMemberFunction(getChZeroScaleCalibration, "GET_ZERO_SCALE_CAL");
+    registerMemberFunction(getChFullScaleCalibration, "GET_FULL_SCALE_CAL");
+    registerMemberFunction(setChZeroScaleCalibration, "SET_ZERO_SCALE_CAL");
+    registerMemberFunction(setChFullScaleCalibration, "SET_FULL_SCALE_CAL");
+    registerMemberFunction(resetToPreviousConversionTimesSerial,"RESET_MAINTAIN");
   }
 
   inline static void addBoard(int cs_pin, int data_ready,
@@ -107,6 +112,39 @@ class ADCController {
   inline static float getVoltage(int channel_index) {
     return adc_boards[getBoardIndexFromGlobalIndex(channel_index)].readVoltage(
         getChannelIndexFromGlobalIndex(channel_index));
+  }
+
+  inline static OperationResult getChZeroScaleCalibration(int channel_index) {
+    uint32_t data = adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
+        .getZeroScaleCalibration(getChannelIndexFromGlobalIndex(channel_index));
+    return OperationResult::Success(String(data));
+  }
+
+  inline static OperationResult getChFullScaleCalibration(int channel_index) {
+    uint32_t data = adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
+        .getFullScaleCalibration(getChannelIndexFromGlobalIndex(channel_index));
+    return OperationResult::Success(String(data));
+  }
+
+  inline static OperationResult setChZeroScaleCalibration(int channel_index, uint32_t value) {
+    adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
+        .setZeroScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
+                                 value);
+    return OperationResult::Success("Set zero scale calibration");
+  }
+
+  inline static OperationResult setChFullScaleCalibration(int channel_index, uint32_t value) {
+    adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
+        .setFullScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
+                                 value);
+    return OperationResult::Success("Set full scale calibration");
+  }
+
+  inline static OperationResult resetToPreviousConversionTimesSerial() {
+    for (auto& board : adc_boards) {
+      board.resetToPreviousConversionTimes();
+    }
+    return OperationResult::Success("Reset to previous conversion times");
   }
 
   inline static float getDataReadyPin(int board_index) {

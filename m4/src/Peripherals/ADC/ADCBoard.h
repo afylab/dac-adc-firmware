@@ -131,8 +131,59 @@ class ADCBoard {
     }
   }
 
+  uint32_t getZeroScaleCalibration(int adc_channel) {
+    byte data[4] = {0, 0, 0, 0};
+    data[0] = READ | ADDR_CHANNELZEROSCALECAL(adc_channel);
+
+    commsController.transferADC(data, 4);
+    uint32_t result = data[1] << 16 | data[2] << 8 | data[3];
+    return result;
+  }
+
+  uint32_t getFullScaleCalibration(int adc_channel) {
+    byte data[4] = {0, 0, 0, 0};
+    data[0] = READ | ADDR_CHANNELFULLSCALECAL(adc_channel);
+
+    commsController.transferADC(data, 4);
+    uint32_t result = data[1] << 16 | data[2] << 8 | data[3];
+    return result;
+  }
+
+  void setZeroScaleCalibration(int adc_channel, uint32_t value) {
+    byte data[4] = {0, 0, 0, 0};
+    data[0] = WRITE | ADDR_CHANNELZEROSCALECAL(adc_channel);
+    data[1] = 0xFF & (value >> 16);
+    data[2] = 0xFF & (value >> 8);
+    data[3] = 0xFF & value;
+
+    commsController.transferADC(data, 4);
+  }
+
+  void setFullScaleCalibration(int adc_channel, uint32_t value) {
+    byte data[4] = {0, 0, 0, 0};
+    data[0] = WRITE | ADDR_CHANNELFULLSCALECAL(adc_channel);
+    data[1] = 0xFF & (value >> 16);
+    data[2] = 0xFF & (value >> 8);
+    data[3] = 0xFF & value;
+
+    commsController.transferADC(data, 4);
+  }
+
   void resetToPreviousConversionTimes() {
+    uint32_t zeroScaleCalibrations[NUM_CHANNELS_PER_ADC_BOARD];
+    uint32_t fullScaleCalibrations[NUM_CHANNELS_PER_ADC_BOARD];
+
+    for(int i = 0; i<NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      zeroScaleCalibrations[i] = getZeroScaleCalibration(i);
+      fullScaleCalibrations[i] = getFullScaleCalibration(i);
+    }
+    
     reset();
+
+    for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      setZeroScaleCalibration(i, zeroScaleCalibrations[i]);
+      setFullScaleCalibration(i, fullScaleCalibrations[i]);
+    }
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       setConversionTime(i, conversion_times[i]);
     }
@@ -307,6 +358,12 @@ class ADCBoard {
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       idleMode(i);
     }
+
+    //Set I/O Register such that P1 bit is set as input and SYNC pin function is enabled
+    byte data[2];
+    data[0] = WRITE | ADDR_IO;
+    data[1] = 0b00010001;
+    commsController.transferADC(data, 2);
   }
 
   uint8_t talkADC(byte command) {
