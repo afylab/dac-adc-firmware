@@ -55,6 +55,7 @@ class ADCController {
     registerMemberFunction(setConversionTime, "CONVERT_TIME");
     registerMemberFunction(setConversionTimeFW, "CONVERT_TIME_FW");
     registerMemberFunction(getConversionTime, "GET_CONVERT_TIME");
+    registerMemberFunction(getRevisionRegister, "GET_REVISION_REG");
     registerMemberFunction(continuousConvertRead,
                                "CONTINUOUS_CONVERT_READ");
     registerMemberFunction(idleMode, "IDLE_MODE");
@@ -112,6 +113,14 @@ class ADCController {
   inline static float getVoltage(int channel_index) {
     return adc_boards[getBoardIndexFromGlobalIndex(channel_index)].readVoltage(
         getChannelIndexFromGlobalIndex(channel_index));
+  }
+
+  inline static OperationResult getRevisionRegister(int board_index) {
+    if (board_index < 0 || board_index >= adc_boards.size()) {
+      return OperationResult::Failure("Invalid board index");
+    }
+    uint8_t revision = adc_boards[board_index].getRevisionRegister();
+    return OperationResult::Success(String(revision));
   }
 
   inline static OperationResult getChZeroScaleCalibration(int channel_index) {

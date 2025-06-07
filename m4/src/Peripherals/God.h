@@ -154,10 +154,26 @@ class God {
 
     int max_indep_ADCs = *std::max_element(adc_usage, adc_usage + 4);
 
+    // TODO: put in some limits for the time series ramp related to ADC conversion time scaling
+    //check to see if buffer ramp is compatible with the current ADC configuration
+    float convTimeSum[4] = {0.0, 0.0, 0.0, 0.0};
+    uint8_t board_num = 0;
+    int chNum = 0;
+    for (int i = 0; i < numAdcChannels; i++) {
+      chNum = adcChannels[i];
+      board_num = chNum / 4; // 0-based board index
+      convTimeSum[board_num] += ADCController::getConversionTimeFloat(adcChannels[i]);
+    }
+    float maxConvTime = *std::max_element(std::begin(convTimeSum), std::end(convTimeSum));
+    if(maxConvTime + dac_interval_us + 50 >= adc_interval_us) {
+      return OperationResult::Failure("ADC delay time is too short, please increase it");
+    }
+
+    // check dac update frequency compatibility 
     if(max_indep_ADCs <= 0) {
       return OperationResult::Failure("No ADC channels provided");
     } else if (max_indep_ADCs == 1) {
-      if (dac_interval_us < 50) {
+      if (dac_interval_us < 60) {
         return OperationResult::Failure("DAC interval too short, please increase it");
       }
     } else if (max_indep_ADCs == 2) {
@@ -221,15 +237,20 @@ class God {
       #endif
     }
 
+    //float cycles = 0.0;
+    //uint32_t start = DWT->CYCCNT;
+
     while ((x < saved_data_size || steps < numSteps) && !getStopFlag()) {
+      __WFE(); // Wait for event, this will block until an interrupt occurs
       if (TimingUtil::dacFlag && steps < numSteps) {
-        __WFE();
         if (steps < numSteps - 1) {
           #if !defined(__NEW_SHIELD__)
           PeripheralCommsController::beginDacTransaction();
           #endif
           for (int i = 0; i < numDacChannels; i++) {
+            //start = DWT->CYCCNT; // reset cycle counter
             DACController::setVoltageNoTransactionNoLdac(dacChannels[i], nextVoltageSet[i]);
+            //cycles = static_cast<float>(DWT->CYCCNT - start);
             nextVoltageSet[i] += voltageStepSize[i];
           }
           #if !defined(__NEW_SHIELD__)
@@ -239,6 +260,7 @@ class God {
         
         steps++;
         TimingUtil::dacFlag = false;
+        //m4SendFloat(&cycles, 1); // send cycles for debugging
       }
       if (TimingUtil::adcFlag == adcMask && x < saved_data_size) {
         #if !defined(__NEW_SHIELD__)

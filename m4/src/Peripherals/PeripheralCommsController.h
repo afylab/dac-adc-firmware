@@ -102,7 +102,7 @@ class PeripheralCommsController {
             spi_regs = (SPI_TypeDef*)SPI1_BASE;
             #endif
         }
-        
+    
         // Chip Select LOW
         digitalWrite(cs_pin, LOW);
         
@@ -141,7 +141,7 @@ class PeripheralCommsController {
         // Enable DMA streams
         rx_stream->CR |= DMA_SxCR_EN;
         tx_stream->CR |= DMA_SxCR_EN;
-        
+
         // Enable SPI and start transfer
         spi_regs->CR1 |= SPI_CR1_SPE;
         spi_regs->CR1 |= SPI_CR1_CSTART;

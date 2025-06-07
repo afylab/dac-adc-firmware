@@ -271,6 +271,14 @@ class ADCBoard {
     // data is ready when _rdy goes low
   }
 
+  uint8_t getRevisionRegister() {
+    byte data[2] = {0, 0};
+    data[0] = READ | ADDR_REVISION;
+
+    commsController.transferADC(data, 2);
+    return data[1];
+  }
+
   void setConversionTime(int adc_channel, int chop, int fw) {
     byte chop_byte = chop == 1 ? 0x80 : 0x00;
     byte send = chop_byte | static_cast<byte>(fw);

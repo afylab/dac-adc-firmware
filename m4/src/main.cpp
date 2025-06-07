@@ -27,11 +27,11 @@ void setup() {
 
   // timing debug stuff
   // // Enable trace and debug blocks (TRCENA bit in DEMCR)
-  // CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
+  //CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;
   // // Clear the counter
-  // DWT->CYCCNT = 0;
+  //DWT->CYCCNT = 0;
   // // Enable the cycle counter
-  // DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
+  //DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;
 
   UserIOHandler::setup();
 
