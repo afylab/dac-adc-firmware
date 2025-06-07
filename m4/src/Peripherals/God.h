@@ -165,7 +165,7 @@ class God {
       convTimeSum[board_num] += ADCController::getConversionTimeFloat(adcChannels[i]);
     }
     float maxConvTime = *std::max_element(std::begin(convTimeSum), std::end(convTimeSum));
-    if(maxConvTime + dac_interval_us + 50 >= adc_interval_us) {
+    if(maxConvTime + 150 >= adc_interval_us) {
       return OperationResult::Failure("ADC delay time is too short, please increase it");
     }
 
