@@ -58,9 +58,11 @@ void setup() {
   // Wait for calibration data to be sent
   while (!isCalibrationReady());
 
+  //load calibration data from Flash
   CalibrationData calibrationData;
   m4ReceiveCalibrationData(calibrationData);
 
+  // Set calibrations for DAC
   for (int i=0; i<NUM_DAC_CHANNELS; i++) {
     DACController::setCalibration(i, calibrationData.offset[i], calibrationData.gain[i]);
   }

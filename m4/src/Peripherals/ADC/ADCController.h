@@ -183,7 +183,7 @@ class ADCController {
 
     int x = 0;
 
-    float adcConversionTime = getConversionTimeFloat(adcChannels[0]);
+    float adcConversionTime = numAdcChannels * getConversionTimeFloat(adcChannels[0]);
 
     for (int i = 1; i < numAdcChannels; i++) {
       if (getConversionTimeFloat(adcChannels[i]) != adcConversionTime) {
