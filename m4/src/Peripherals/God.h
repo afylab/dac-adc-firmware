@@ -20,10 +20,9 @@ class God {
     registerMemberFunction(initialize, "INITIALIZE");
     registerMemberFunction(initialize, "INIT");
     registerMemberFunction(initialize, "INNIT");
-    registerMemberFunctionVector(timeSeriesBufferRampWrapper,
-                                 "TIME_SERIES_BUFFER_RAMP");
-    registerMemberFunctionVector(dacLedBufferRampWrapper,
-                                 "DAC_LED_BUFFER_RAMP");
+    registerMemberFunctionVector(timeSeriesBufferRampWrapper, "TIME_SERIES_BUFFER_RAMP");
+    registerMemberFunctionVector(dacLedBufferRampWrapper, "DAC_LED_BUFFER_RAMP");
+    registerMemberFunctionVector(timeSeriesAdcRead, "TIME_SERIES_ADC_READ");
     registerMemberFunction(dacChannelCalibration, "DAC_CH_CAL");
     registerMemberFunctionVector(boxcarAverageRamp, "BOXCAR_BUFFER_RAMP");
   }
@@ -54,6 +53,173 @@ class God {
       std::sort(boards.begin(), boards.end());
 
       return BoardUsage{ static_cast<uint8_t>(boards.size()), boards };
+  }
+
+  inline static OperationResult timeSeriesAdcRead(const std::vector<float>& args) {
+    /**************************************************************************/
+    // args: num_channels, channel_indexes, conversion_time, total_duration_us
+    // ex: TIME_SERIES_ADC_READ 2,0,1,1000000
+    //
+    // Function takes a vector of floats as input, where:
+    // args[0] = number of ADC channels = numAdcChannels
+    // args[1] to args[numAdcChannels] = ADC channel indexes
+    // args[numAdcChannels + 1] = conversion time in microseconds
+    // args[numAdcChannels + 2] = total duration in microseconds
+    /**************************************************************************/
+
+    // Check if we have enough arguments
+    if (args.size() < 4) {
+      return OperationResult::Failure("Not enough arguments provided");
+    }
+
+    // Check if the first argument is a valid number of ADC channels
+    int numAdcChannels = static_cast<int>(args[0]);
+    if (args.size() != static_cast<size_t>(numAdcChannels + 3)) {
+      return OperationResult::Failure("Incorrect number of arguments");
+    }
+
+    // Setting up a vector of ADC channels from arguments directly after numAdcChannels
+    std::vector<int> adcChannels_vec;
+    for (int i = 0; i < numAdcChannels; ++i) {
+      adcChannels_vec.push_back(static_cast<int>(args[i + 1]));
+    }
+    int* adcChannels = adcChannels_vec.data();
+
+    // Check to see if the total duration is valid (needs to be at least 82 microseconds)
+    uint32_t conversion_time = static_cast<uint32_t>(args[numAdcChannels + 1]);
+    uint32_t totalDuration = static_cast<uint32_t>(args[numAdcChannels + 2]);
+    if (totalDuration < 82) {
+      return OperationResult::Failure("Invalid total duration");
+    }
+
+    //Set conversion time for each channel (same conversion time for all channels)
+    float realConversionTime = 0;
+    for (int i = 0; i < numAdcChannels; i++) {
+      ADCController::setConversionTime(adcChannels[i], conversion_time);
+    }
+    realConversionTime = ADCController::getConversionTimeFloat(adcChannels[0]);
+
+    // Determine the maximum number of independent ADCs used
+    int adc_usage[4] = {0, 0, 0, 0};
+    for (int i = 0; i < numAdcChannels; ++i) {
+      int ch = adcChannels[i];
+      if (ch < 0) continue;          // skip invalid values
+      uint8_t board = ch / 4;        // 0‑based board index
+      adc_usage[board]++;
+    }
+
+    int max_indep_ADCs = *std::max_element(adc_usage, adc_usage + 4);
+    
+    //set sampling rate based on +5% conversion time and the number of ADC channels
+    const double sample_rate_float = max_indep_ADCs * realConversionTime * 1.5f;
+    const int sample_rate = static_cast<int>(sample_rate_float);
+
+    // Calculate the number of data points to save
+    const int saved_data_size = totalDuration / sample_rate;
+
+    // Send the number of bytes to expect before starting the ADC read
+    m4SendVoltage(&sample_rate_float, 1);
+
+    // Toggle stop flag and turn on data LED
+    setStopFlag(false);
+    PeripheralCommsController::dataLedOn();
+
+    #ifdef __NEW_DAC_ADC__
+    digitalWrite(adc_sync, LOW); //Set the sync pin low to prevent ADCs from triggering
+    static void (*isrFunctions[])() = { // Array of ISR functions for each ADC board
+      TimingUtil::adcSyncISR<0>,
+      TimingUtil::adcSyncISR<1>,
+      TimingUtil::adcSyncISR<2>,
+      TimingUtil::adcSyncISR<3>
+    };
+
+    BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
+    int numAdcBoards = boardUsage.numBoards;
+    std::vector<uint8_t> adcBoards = boardUsage.idx;
+
+    // Attach interrupts for each ADC board's data ready pin
+    for (int i = 0; i < numAdcBoards; i++) {
+      uint8_t boardIndex = adcBoards[i];
+      attachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boardIndex)), isrFunctions[boardIndex], FALLING);
+    }
+    #endif
+
+    // reset all ADCs before ramp
+    ADCController::resetToPreviousConversionTimes();
+
+    // Start continous conversion for each ADC channel
+    for (int i = 0; i < numAdcChannels; i++) {
+      ADCController::startContinuousConversion(adcChannels[i]);
+      #ifdef __NEW_DAC_ADC__
+      ADCController::setRDYFN(adcChannels[i]);
+      #endif
+    }
+
+    // initialize ADC mask
+    uint8_t adcMask = 0u;
+    #ifdef __NEW_DAC_ADC__
+    for (int i = 0; i < numAdcBoards; i++) {
+      adcMask |= 1 << i;
+    }
+    #else
+    adcMask = 1;
+    #endif
+
+    // Set up timers for ADC sampling
+    TimingUtil::setupTimersOnlyADC(sample_rate);
+
+    // initialize loop counter
+    int x = 0;
+
+    //Begin main loop
+    while (x < saved_data_size && !getStopFlag()) {
+      __WFE(); // Wait for event (WFE) to reduce CPU usage
+      if (TimingUtil::adcFlag == adcMask) {
+        double packets[numAdcChannels];
+        for (int i = 0; i < numAdcChannels; i++) {
+          double v = ADCController::getVoltageDataNoTransaction(adcChannels[i]);
+          packets[i] = v;
+        }
+        m4SendVoltage(packets, numAdcChannels);
+        x++;
+        TimingUtil::adcFlag = 0;
+
+        #ifdef __NEW_DAC_ADC__
+        digitalWrite(adc_sync, LOW);
+        #endif
+      }
+    }
+
+    // Clean up after the loop
+    //Disable ADC timer interrupt
+    TimingUtil::disableAdcInterrupt();
+
+    // Set the ADCs into idle mode and unset the readyfnc bit (this allows single channel ADC conversions -- ready flag goes high after any ADC has unread data)
+    for (int i = 0; i < numAdcChannels; i++) {
+      ADCController::idleMode(adcChannels[i]);
+      #ifdef __NEW_DAC_ADC__
+      ADCController::unsetRDYFN(adcChannels[i]);
+      #endif
+    }
+
+    // reset all ADCs after ramp
+    ADCController::resetToPreviousConversionTimes();
+
+    //Detach hardware interrupt for ready pin on ADCs
+    #ifdef __NEW_DAC_ADC__
+    for (int i = 0; i < numAdcBoards; i++) {
+      detachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(adcBoards[i])));
+    }
+    #endif
+
+    PeripheralCommsController::dataLedOff();
+
+    if (getStopFlag()) {
+      setStopFlag(false);
+      return OperationResult::Failure("RAMPING_STOPPED");
+    }
+
+    return OperationResult::Success();
   }
 
   // args:

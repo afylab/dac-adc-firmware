@@ -75,6 +75,46 @@ struct TimingUtil {
     TIM1->CR1 |= TIM_CR1_CEN;
   }
 
+  inline static void setupTimersOnlyADC(uint32_t adc_period_us) {
+    resetTimers();
+
+    // Enable TIM8 clock
+    __HAL_RCC_TIM8_CLK_ENABLE();
+
+    uint64_t timerClock = 2 * HAL_RCC_GetPCLK2Freq();
+    
+    uint64_t total_ticks_adc = (adc_period_us * timerClock) / 1000000;
+
+    uint16_t psc_adc;
+    uint16_t arr_adc;
+
+    if (total_ticks_adc <= 65536) {
+        psc_adc = 0;                // No prescaling
+        arr_adc = total_ticks_adc - 1;    // Full resolution within 16 bits
+    } else {
+        // Compute the minimal prescaler (PSC+1) needed so that ARR <= 65535
+        uint32_t prescaler_adc = (total_ticks_adc + 65536 - 1) / 65536;  // Rounds up division
+        psc_adc = prescaler_adc - 1;   // Because PSC register = (PSC+1) - 1
+        arr_adc = (total_ticks_adc / prescaler_adc) - 1;  // ARR counts from 0 to ARR, hence subtract 1
+    }
+
+    // Configure TIM8
+    TIM8->PSC = psc_adc;
+    TIM8->ARR = arr_adc;
+    TIM8->CR1 = TIM_CR1_ARPE;
+    TIM8->DIER |= TIM_DIER_UIE;
+
+    TIM8->EGR |= 0x01;
+    TIM8->SR &= ~TIM_SR_UIF;
+
+    // Enable interrupts
+    NVIC_SetPriority(TIM8_UP_TIM13_IRQn, 3);
+    NVIC_EnableIRQ(TIM8_UP_TIM13_IRQn);
+
+    // Start timer
+    TIM8->CR1 |= TIM_CR1_CEN;
+  }
+
   inline static void setupTimersTimeSeries(uint32_t dac_period_us,
                                            uint32_t adc_period_us) {
     resetTimers();

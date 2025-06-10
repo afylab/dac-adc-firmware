@@ -56,18 +56,14 @@ class ADCController {
     registerMemberFunction(setConversionTimeFW, "CONVERT_TIME_FW");
     registerMemberFunction(getConversionTime, "GET_CONVERT_TIME");
     registerMemberFunction(getRevisionRegister, "GET_REVISION_REG");
-    registerMemberFunction(continuousConvertRead,
-                               "CONTINUOUS_CONVERT_READ");
+    registerMemberFunction(continuousConvertRead, "CONTINUOUS_CONVERT_READ");
     registerMemberFunction(idleMode, "IDLE_MODE");
     registerMemberFunction(getChannelsActive, "GET_CHANNELS_ACTIVE");
     registerMemberFunction(resetAllADCBoards, "RESET");
     registerMemberFunction(talkADC, "TALK");
     registerMemberFunction(adcZeroScaleCal, "ADC_ZERO_SC_CAL");
-    registerMemberFunction(adcChannelSystemZeroScaleCal,
-                               "ADC_CH_ZERO_SC_CAL");
-    registerMemberFunction(adcChannelSystemFullScaleCal,
-                               "ADC_CH_FULL_SC_CAL");
-    registerMemberFunctionVector(timeSeriesAdcRead, "TIME_SERIES_ADC_READ");
+    registerMemberFunction(adcChannelSystemZeroScaleCal, "ADC_CH_ZERO_SC_CAL");
+    registerMemberFunction(adcChannelSystemFullScaleCal, "ADC_CH_FULL_SC_CAL");
     registerMemberFunction(setRDYFN, "SET_RDYFN");
     registerMemberFunction(unsetRDYFN, "UNSET_RDYFN");
     registerMemberFunction(getChZeroScaleCalibration, "GET_ZERO_SCALE_CAL");
@@ -158,80 +154,6 @@ class ADCController {
 
   inline static float getDataReadyPin(int board_index) {
     return adc_boards[board_index].getDataReadyPin();
-  }
-
-  // args: num_channels, channel_indexes, total_duration_us
-  // ex: TIME_SERIES_ADC_READ 2,0,1,1000000
-  inline static OperationResult timeSeriesAdcRead(const std::vector<float>& args) {
-    if (args.size() < 2) {
-      return OperationResult::Failure("Not enough arguments provided");
-    }
-
-    int numAdcChannels = static_cast<int>(args[0]);
-    if (args.size() != static_cast<size_t>(numAdcChannels + 2)) {
-      return OperationResult::Failure("Incorrect number of arguments");
-    }
-    std::vector<int> adcChannels;
-    for (int i = 0; i < numAdcChannels; ++i) {
-      adcChannels.push_back(static_cast<int>(args[i + 1]));
-    }
-
-    uint32_t totalDuration = static_cast<uint32_t>(args[numAdcChannels + 1]);
-    if (totalDuration < 82) {
-      return OperationResult::Failure("Invalid total duration");
-    }
-
-    int x = 0;
-
-    float adcConversionTime = numAdcChannels * getConversionTimeFloat(adcChannels[0]);
-
-    for (int i = 1; i < numAdcChannels; i++) {
-      if (getConversionTimeFloat(adcChannels[i]) != adcConversionTime) {
-        return OperationResult::Failure("All channels must have the same "
-                                       "conversion time for time series read");
-      }
-    }
-
-    const int saved_data_size = totalDuration / adcConversionTime;
-
-    setStopFlag(false);
-    PeripheralCommsController::dataLedOn();
-
-    for (int i = 0; i < numAdcChannels; i++) {
-      ADCController::startContinuousConversion(adcChannels[i]);
-    }
-    TimingUtil::setupTimersTimeSeries(10000, adcConversionTime);
-
-
-    while (x < saved_data_size && !getStopFlag()) {
-      if (TimingUtil::adcFlag) {
-        float packets[numAdcChannels];
-        for (int i = 0; i < numAdcChannels; i++) {
-          float v =
-              getVoltageDataNoTransaction(adcChannels[i]);
-          packets[i] = v;
-        }
-        m4SendFloat(packets, numAdcChannels);
-        x++;
-        // TimingUtil::adcFlag = false;
-      }
-    }
-
-    TimingUtil::disableDacInterrupt();
-    TimingUtil::disableAdcInterrupt();
-
-    for (int i = 0; i < numAdcChannels; i++) {
-      ADCController::idleMode(adcChannels[i]);
-    }
-
-    PeripheralCommsController::dataLedOff();
-
-    if (getStopFlag()) {
-      setStopFlag(false);
-      return OperationResult::Failure("RAMPING_STOPPED");
-    }
-
-    return OperationResult::Success();
   }
 
   inline static uint32_t getConversionData(int adc_channel) {
