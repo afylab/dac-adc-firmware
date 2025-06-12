@@ -71,11 +71,12 @@ class ADCController {
     registerMemberFunction(setChZeroScaleCalibration, "SET_ZERO_SCALE_CAL");
     registerMemberFunction(setChFullScaleCalibration, "SET_FULL_SCALE_CAL");
     registerMemberFunction(resetToPreviousConversionTimesSerial,"RESET_MAINTAIN");
+    registerMemberFunction(hardResetAllADCBoards, "HARD_RESET");
   }
 
   inline static void addBoard(int cs_pin, int data_ready,
-                              int reset_pin) {
-    ADCBoard newBoard = ADCBoard(cs_pin, data_ready, reset_pin);
+                              int reset_pin, int board_idx) {
+    ADCBoard newBoard = ADCBoard(cs_pin, data_ready, reset_pin, board_idx);
     adc_boards.push_back(newBoard);
   }
 
@@ -249,6 +250,20 @@ class ADCController {
     return result.substring(0, result.length() - 1);
   }
 
+  inline static OperationResult hardResetAllADCBoards() {
+    for (auto& board : adc_boards) {
+      board.hardReset();
+    }
+    
+    // Tell system is not calibrated
+    CalibrationData data;
+    m4ReceiveCalibrationData(data);
+    data.adcCalibrated = false;
+    m4SendCalibrationData(data);
+
+    return OperationResult::Success("All ADC boards have been hard reset");
+  }
+
   inline static OperationResult resetAllADCBoards() {
     for (auto board : adc_boards) {
       board.reset();
@@ -289,7 +304,7 @@ class ADCController {
     return OperationResult::Success("CALIBRATION_FINISHED");
   }
 
-  static OperationResult setConversionTime(int adc_channel, int time_us) {
+  static OperationResult setConversionTime(int adc_channel, float time_us) {
     if (!isChannelIndexValid(adc_channel)) {
       return OperationResult::Failure("Invalid channel index");
     }

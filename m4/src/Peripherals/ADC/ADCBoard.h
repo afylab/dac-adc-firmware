@@ -73,7 +73,7 @@ class ADCBoard {
   int cs_pin;
   int data_ready_pin;
   int reset_pin;
-  int conversion_times[NUM_CHANNELS_PER_ADC_BOARD];
+  int board_idx;
   PeripheralCommsController commsController;
 
   void waitDataReady() {
@@ -90,8 +90,8 @@ class ADCBoard {
  public:
   bool data_ready = false;
 
-  ADCBoard(int cs_pin, int data_ready_pin, int reset_pin)
-      : cs_pin(cs_pin), data_ready_pin(data_ready_pin), reset_pin(reset_pin), commsController(cs_pin) {}
+  ADCBoard(int cs_pin, int data_ready_pin, int reset_pin, int board_idx )
+      : cs_pin(cs_pin), data_ready_pin(data_ready_pin), reset_pin(reset_pin), board_idx(board_idx), commsController(cs_pin) {}
 
   void setup() {
     pinMode(reset_pin, OUTPUT);
@@ -173,6 +173,11 @@ class ADCBoard {
     uint32_t zeroScaleCalibrations[NUM_CHANNELS_PER_ADC_BOARD];
     uint32_t fullScaleCalibrations[NUM_CHANNELS_PER_ADC_BOARD];
 
+    float conversion_times[NUM_CHANNELS_PER_ADC_BOARD];
+    for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      conversion_times[i] = getConversionTime(i); 
+    }
+
     for(int i = 0; i<NUM_CHANNELS_PER_ADC_BOARD; i++) {
       zeroScaleCalibrations[i] = getZeroScaleCalibration(i);
       fullScaleCalibrations[i] = getFullScaleCalibration(i);
@@ -190,6 +195,7 @@ class ADCBoard {
   }
 
   int getDataReadyPin() const { return data_ready_pin; }
+  int getBoardIndex() const { return board_idx; }
 
   void setReadyFlag() { data_ready = true; }
   void clearReadyFlag() { data_ready = false; }
@@ -353,6 +359,28 @@ class ADCBoard {
     return (status & (1 << adc_channel)) != 0;
   }
 
+  void hardReset() {
+    digitalWrite(reset_pin, HIGH);
+    digitalWrite(reset_pin, LOW);
+    delay(5);
+    digitalWrite(reset_pin, HIGH);
+
+    for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      idleMode(i);
+    }
+  }
+
+  void restoreCalibrationFromFlash() {
+    CalibrationData data;
+    m4ReceiveCalibrationData(data);
+    int boardIndex = getBoardIndex();
+
+    for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      setZeroScaleCalibration(i, data.adc_offset[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + i]);
+      setFullScaleCalibration(i, data.adc_gain[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + i]);
+    }
+  }
+
   void reset() {
     digitalWrite(reset_pin, HIGH);
     digitalWrite(reset_pin, LOW);
@@ -372,6 +400,8 @@ class ADCBoard {
     data[0] = WRITE | ADDR_IO;
     data[1] = 0b00010001;
     commsController.transferADC(data, 2);
+
+    restoreCalibrationFromFlash();
   }
 
   uint8_t talkADC(byte command) {
@@ -411,8 +441,6 @@ class ADCBoard {
 
     // could've done the calculation with user-given values but it's good to check
     float time_us = getConversionTime(channel, moreThanOneChannelActive);
-
-    conversion_times[channel] = time_us;
 
     delayMicroseconds(100);
 
@@ -503,6 +531,17 @@ class ADCBoard {
     #endif
     commsController.transferADC(data, 2);
     waitDataReady();
+
+    // wait for the data ready flag to be set then store the calibration data in flash 
+    int boardIndex = getBoardIndex();
+
+    uint32_t zeroScaleCalibration = getZeroScaleCalibration(channel);
+
+    CalibrationData calibrationData;
+    m4ReceiveCalibrationData(calibrationData);
+    calibrationData.adc_offset[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + channel] = zeroScaleCalibration;
+    m4SendCalibrationData(calibrationData);
+    
   }
 
   void fullScaleChannelSystemSelfCalibration(int channel) {
@@ -514,6 +553,16 @@ class ADCBoard {
     #endif
     commsController.transferADC(data, 2);
     waitDataReady();
+
+    // wait for the data ready flag to be set then store the calibration data in flash
+    int boardIndex = getBoardIndex();
+
+    uint32_t fullScaleCalibration = getFullScaleCalibration(channel);
+
+    CalibrationData calibrationData;
+    m4ReceiveCalibrationData(calibrationData);
+    calibrationData.adc_gain[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + channel] = fullScaleCalibration;
+    m4SendCalibrationData(calibrationData);
   }
 };
 

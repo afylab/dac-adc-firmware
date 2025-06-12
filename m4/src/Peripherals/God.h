@@ -139,8 +139,7 @@ class God {
 
     // Attach interrupts for each ADC board's data ready pin
     for (int i = 0; i < numAdcBoards; i++) {
-      uint8_t boardIndex = adcBoards[i];
-      attachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boardIndex)), isrFunctions[boardIndex], FALLING);
+      attachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(adcBoards[i])), isrFunctions[i], FALLING);
     }
     #endif
 

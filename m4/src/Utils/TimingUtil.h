@@ -115,21 +115,34 @@ struct TimingUtil {
     TIM8->CR1 |= TIM_CR1_CEN;
   }
 
-  inline static void setupTimersTimeSeries(uint32_t dac_period_us,
-                                           uint32_t adc_period_us) {
+  inline static void setupTimersTimeSeries(uint32_t dac_period_us, uint32_t adc_period_us) {
+    //******************************************************************/
+    // setupTimersTimeSeries takes in two periods in microseconds and 
+    // setups two individual timers to trigger interrupts based on their 
+    // respective counter over flow.  The two timers run indpendent of
+    // each other, but are synchronized to the same clock source.
+    // The first timer (TIM1) is used for DAC updates, and the second timer
+    // (TIM8) is used for ADC sampling. 
+    //******************************************************************/
     resetTimers();
 
     // Enable TIM1 and TIM8 clocks
    __HAL_RCC_TIM1_CLK_ENABLE();
     __HAL_RCC_TIM8_CLK_ENABLE();
 
+    // Get the timer clock frequency
     uint64_t timerClock = 2 * HAL_RCC_GetPCLK2Freq();
     
+    // Calculate total timer ticks for the desired periods (in µs)
     uint64_t total_ticks_dac = (dac_period_us * timerClock) / 1000000;
 
     uint16_t psc_dac;
     uint16_t arr_dac;
 
+    // Determine prescaler and 16-bit auto-reload value for TIM1 (DAC)
+    // If total_ticks_dac is less than or equal to 65536, no prescaling is needed and we can use the full 16-bit resolution of the timer.
+    // Otherwise, we need to compute the minimal prescaler (clock division = (PSC+1)) so that ARR <= 65535 and adjust the ARR value accordingly.
+    
     if (total_ticks_dac <= 65536) {
         psc_dac = 0;                // No prescaling
         arr_dac = total_ticks_dac - 1;    // Full resolution within 16 bits
@@ -140,6 +153,7 @@ struct TimingUtil {
         arr_dac = (total_ticks_dac / prescaler_dac) - 1;  // ARR counts from 0 to ARR, hence subtract 1
     }
 
+    // Determine prescaler and 16-bit auto-reload value for TIM8 (ADC)
     uint64_t total_ticks_adc = (adc_period_us * timerClock) / 1000000;
 
     uint16_t psc_adc;
@@ -161,10 +175,9 @@ struct TimingUtil {
     TIM1->CR1 = TIM_CR1_ARPE;
     TIM1->DIER |= TIM_DIER_UIE;
 
+    // Clear update interrupt flag and enable update event generation flags for TIM1
     TIM1->EGR |= 0x01;
     TIM1->SR &= ~TIM_SR_UIF;
-    TIM1->EGR |= 0x02;
-    TIM1->CCR1 &= ~TIM_SR_CC1IF;
 
     // Configure TIM8
     TIM8->PSC = psc_adc;
@@ -172,10 +185,9 @@ struct TimingUtil {
     TIM8->CR1 = TIM_CR1_ARPE;
     TIM8->DIER |= TIM_DIER_UIE;
 
+    // Clear update interrupt flag and enable update event generation flags for TIM8
     TIM8->EGR |= 0x01;
     TIM8->SR &= ~TIM_SR_UIF;
-    TIM8->EGR |= 0x02;
-    TIM8->CCR1 &= ~TIM_SR_CC1IF;
 
     // Enable interrupts
     NVIC_SetPriority(TIM1_UP_IRQn, 2);
@@ -252,14 +264,20 @@ struct TimingUtil {
       // No phase shift: use the update interrupt for ADC triggering.
       TIM8->DIER |= TIM_DIER_UIE;
     }
+    // Clear update interrupt flag and enable update event generation flags for TIM1
     TIM1->EGR |= 0x01;
     TIM1->SR &= ~TIM_SR_UIF;
     TIM1->EGR |= 0x02;
-    TIM1->CCR1 &= ~TIM_SR_CC1IF;
+    TIM1->SR &= ~TIM_SR_CC1IF;
+
+    //Clear update interrupt flag and enable update event generation flags for TIM8
+    TIM8->EGR |= 0x01;
+    TIM8->SR &= ~TIM_SR_UIF;
+    TIM8->EGR |= 0x02;
+    TIM8->SR &= ~TIM_SR_CC1IF;
 
     NVIC_SetPriority(TIM1_UP_IRQn, 2);
     NVIC_EnableIRQ(TIM1_UP_IRQn);
-
 
     NVIC_SetPriority(TIM8_CC_IRQn, 3);
     NVIC_EnableIRQ(TIM8_CC_IRQn);

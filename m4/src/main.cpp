@@ -43,7 +43,7 @@ void setup() {
   }
 
   for (int i=0; i<NUM_ADC_BOARDS; i++) {
-    ADCController::addBoard(adc_cs_pins[i], drdy[i], reset[i]);
+    ADCController::addBoard(adc_cs_pins[i], drdy[i], reset[i], i);
   }
 
   DACController::setup();
@@ -67,9 +67,27 @@ void setup() {
     DACController::setCalibration(i, calibrationData.offset[i], calibrationData.gain[i]);
   }
 
+  // Set calibrations for ADC
+  if (!calibrationData.adcCalibrated) {
+    // If ADC is not calibrated, reset ADC to all initial values
+    ADCController::hardResetAllADCBoards();
+    for (int i = 0; i < NUM_ADC_BOARDS * NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      uint32_t zeroScaleCalibration = ADCController::getChZeroScaleCalibration(i).getMessage().toInt();
+      uint32_t fullScaleCalibration = ADCController::getChFullScaleCalibration(i).getMessage().toInt();
+
+      calibrationData.adc_offset[i] = zeroScaleCalibration;
+      calibrationData.adc_gain[i] = fullScaleCalibration;
+
+      calibrationData.adcCalibrated = true;
+    }
+    m4SendCalibrationData(calibrationData);
+  } else {
+    for (int i=0; i<NUM_ADC_BOARDS * NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      ADCController::setChZeroScaleCalibration(i, calibrationData.adc_offset[i]);
+      ADCController::setChFullScaleCalibration(i, calibrationData.adc_gain[i]);
+    }
+  }
 }
-
-
 
 void loop() {
   UserIOHandler::handleUserIO();

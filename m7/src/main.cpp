@@ -157,6 +157,9 @@ void setup()
     {
       calibrationData.gain[i] = 1.0f;
       calibrationData.offset[i] = 0.0f;
+      calibrationData.adc_offset[i] = 0x800000; // Default ADC offset
+      calibrationData.adc_gain[i] = 0x200000; // Default ADC gain
+      
     }
   }
   else
