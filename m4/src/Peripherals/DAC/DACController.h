@@ -135,6 +135,7 @@ class DACController {
 
   inline static CalibrationData getCalibrationData() {
     CalibrationData calibrationData;
+    m4ReceiveCalibrationData(calibrationData);
     for (int i = 0; i < NUM_DAC_CHANNELS; i++) {
       calibrationData.offset[i] = dac_channels[i].getOffsetError();
       calibrationData.gain[i] = dac_channels[i].getGainError();
