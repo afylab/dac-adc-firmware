@@ -376,8 +376,6 @@ class God {
     adcMask = 1;
     #endif
 
-    TimingUtil::setupTimersTimeSeries(dac_interval_us, adc_interval_us);
-
     setStopFlag(false);
     PeripheralCommsController::dataLedOn();
 
@@ -386,7 +384,6 @@ class God {
       DACController::setVoltageNoTransactionNoLdac(dacChannels[i], dacV0s[i]);
       nextVoltageSet[i] += voltageStepSize[i];
     }
-
     DACController::toggleLdac();
     steps++;
 
@@ -401,6 +398,8 @@ class God {
       ADCController::setRDYFN(adcChannels[i]);
       #endif
     }
+
+    TimingUtil::setupTimersTimeSeries(dac_interval_us, adc_interval_us);
 
     //float cycles = 0.0;
     //uint32_t start = DWT->CYCCNT;
@@ -639,9 +638,6 @@ class God {
       DACController::setVoltageNoTransactionNoLdac(dacChannels[i], dacV0s[i]);
       nextVoltageSet[i] += voltageStepSize[i];
     }
-    DACController::toggleLdac();
-
-    delayMicroseconds(dac_settling_time_us);
 
     for (int i = 0; i < numAdcChannels; i++) {
       ADCController::startContinuousConversion(adcChannels[i]);
@@ -651,22 +647,21 @@ class God {
     }
 
     TimingUtil::setupTimersDacLed(dac_interval_us, dac_settling_time_us);
-
     TimingUtil::dacFlag = false;
 
     int maxDiff = 0;
-
     x = 0;
     int diff = 0;
     
-    // float cycles = 0.0;
-    // uint32_t start = DWT->CYCCNT;
+    //float cycles = 0.0;
+    //uint32_t start = DWT->CYCCNT;
 
     while (x < numSteps && !getStopFlag()) {
       __WFE();
-      if (TimingUtil::dacFlag && ++dacIncrements < numSteps) {
-        // cycles =  static_cast<float>(DWT->CYCCNT - start);
-        // m4SendFloat(&cycles, 1); // send cycles for debugging
+      //cycles =  static_cast<float>(DWT->CYCCNT - start);
+      //m4SendFloat(&cycles, 1); // send cycles for debugging
+
+      if (TimingUtil::dacFlag && dacIncrements < numSteps) {
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::beginDacTransaction();
         #endif
@@ -674,18 +669,15 @@ class God {
           DACController::setVoltageNoTransactionNoLdac(dacChannels[i], nextVoltageSet[i]);
           nextVoltageSet[i] += voltageStepSize[i];
         }
-        DACController::toggleLdac();
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::endTransaction();
         #endif
         TimingUtil::dacFlag = false;
-
+        dacIncrements++;
 
         // float data[2] = { static_cast<float>(dacIncrements), static_cast<float>(x)};
-        
         // m4SendFloat(data, 2);
-        // cycles =  static_cast<float>(DWT->CYCCNT - start);
-        // m4SendFloat(&cycles, 1);
+
       }
       if (TimingUtil::adcFlag == adcMask) {
         // uint32_t start = DWT->CYCCNT;

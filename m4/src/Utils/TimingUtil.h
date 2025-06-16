@@ -62,6 +62,7 @@ struct TimingUtil {
     }
 
     // Configure TIM1
+    TIM1->CR1 &= ~TIM_CR1_CEN;  // Stop timer before configuration
     TIM1->PSC = psc_dac;
     TIM1->ARR = arr_dac;
     TIM1->CR1 = TIM_CR1_ARPE;
@@ -99,6 +100,7 @@ struct TimingUtil {
     }
 
     // Configure TIM8
+    TIM8->CR1 &= ~TIM_CR1_CEN;  // Stop timer before configuration
     TIM8->PSC = psc_adc;
     TIM8->ARR = arr_adc;
     TIM8->CR1 = TIM_CR1_ARPE;
@@ -170,6 +172,7 @@ struct TimingUtil {
     }
 
     // Configure TIM1
+    TIM1->CR1 &= ~TIM_CR1_CEN;  // Stop timer before configuration
     TIM1->PSC = psc_dac;
     TIM1->ARR = arr_dac;
     TIM1->CR1 = TIM_CR1_ARPE;
@@ -180,6 +183,7 @@ struct TimingUtil {
     TIM1->SR &= ~TIM_SR_UIF;
 
     // Configure TIM8
+    TIM8->CR1 &= ~TIM_CR1_CEN;  // Stop timer before configuration
     TIM8->PSC = psc_adc;
     TIM8->ARR = arr_adc;
     TIM8->CR1 = TIM_CR1_ARPE;
@@ -248,7 +252,7 @@ struct TimingUtil {
     // Clear the SMS bits...
     TIM8->SMCR &= ~TIM_SMCR_SMS;
     // ...and set SMS bits to 0b100 (Reset Mode)
-    TIM8->SMCR |= TIM_SMCR_SMS_2;  // (Assuming SMS_2 represents the bit for value 4)
+    TIM8->SMCR |= TIM_SMCR_SMS_3;  // Sets SMS to trigger + reset mode, this means TIM8 will not start until the first overflow of TIM1
     // --- Configure phase shift if requested ---
     if (phase_shift_us > 0 && phase_shift_us < period_us) {
       // Use Channel 1 compare event for phase-shifted ADC trigger
@@ -256,7 +260,7 @@ struct TimingUtil {
       TIM8->CCR1 = timerPhaseShift;  // Set to the proper timer tick count for the phase shift
       // Set Channel 1 to PWM mode 1: clear then set OC1M bits
       TIM8->CCMR1 &= ~TIM_CCMR1_OC1M;
-      TIM8->CCMR1 |= TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2; 
+      TIM8->CCMR1 |= (TIM_CCMR1_OC1M_1 | TIM_CCMR1_OC1M_2); 
       TIM8->CCER |= TIM_CCER_CC1E;      // Enable CC1 output
       // Enable only the compare interrupt (disable UIE if not needed)
       TIM8->DIER |= TIM_DIER_CC1IE;
@@ -265,12 +269,14 @@ struct TimingUtil {
       TIM8->DIER |= TIM_DIER_UIE;
     }
     // Clear update interrupt flag and enable update event generation flags for TIM1
+    TIM1->CR1 &= ~TIM_CR1_CEN;  // Disable the timer to avoid unwanted interrupts
     TIM1->EGR |= 0x01;
     TIM1->SR &= ~TIM_SR_UIF;
     TIM1->EGR |= 0x02;
     TIM1->SR &= ~TIM_SR_CC1IF;
 
     //Clear update interrupt flag and enable update event generation flags for TIM8
+    TIM8->CR1 &= ~TIM_CR1_CEN;  // Disable the timer to avoid unwanted interrupts
     TIM8->EGR |= 0x01;
     TIM8->SR &= ~TIM_SR_UIF;
     TIM8->EGR |= 0x02;
@@ -282,8 +288,8 @@ struct TimingUtil {
     NVIC_SetPriority(TIM8_CC_IRQn, 3);
     NVIC_EnableIRQ(TIM8_CC_IRQn);
 
-    // Start the slave timer first so it’s waiting for TIM1’s trigger.
-    TIM8->CR1 |= TIM_CR1_CEN;
+    // Start timer 1 (DAC)
+    //TIM8->CR1 |= TIM_CR1_CEN;
     TIM1->CR1 |= TIM_CR1_CEN;
   }
 
@@ -294,6 +300,7 @@ struct TimingUtil {
 
   inline static void disableAdcInterrupt() {
     TIM8->DIER &= ~TIM_DIER_UIE;
+    TIM8->DIER &= ~TIM_DIER_CC1IE; // Disable CC1 interrupt if it was enabled
     NVIC_DisableIRQ(TIM8_UP_TIM13_IRQn);
     NVIC_DisableIRQ(TIM8_CC_IRQn);
   }
