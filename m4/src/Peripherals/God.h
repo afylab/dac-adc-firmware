@@ -638,6 +638,7 @@ class God {
       DACController::setVoltageNoTransactionNoLdac(dacChannels[i], dacV0s[i]);
       nextVoltageSet[i] += voltageStepSize[i];
     }
+    dacIncrements++;
 
     for (int i = 0; i < numAdcChannels; i++) {
       ADCController::startContinuousConversion(adcChannels[i]);

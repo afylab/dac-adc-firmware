@@ -40,7 +40,7 @@ struct UserIOHandler {
   // I HIGHLY recommend using the following format: __SERIAL_NUMBER__ {2 characters representing the instrument} {4 digits for the year} {3 characters for the device ID}
   // The serial number ideally should be set to a default value here and then changed post-compile time using the firmware_uploader.py or patch_serial_number.py scripts.
   __attribute__((section(".serial_number")))
-  inline static const char serial_number[29] = "__SERIAL_NUMBER__DA_2025_002";
+  inline static const char serial_number[29] = "__SERIAL_NUMBER__DA_2025_ABC";
 
   static OperationResult serialNumber() {
     return OperationResult::Success(serial_number + 17);
