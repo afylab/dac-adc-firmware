@@ -69,6 +69,8 @@
 #define ADC2DOUBLE(vin) ADC2DOUBLE24(vin)
 
 class ADCBoard {
+ public:
+  bool chopEnabled = true;
  private:
   int cs_pin;
   int data_ready_pin;
@@ -409,17 +411,15 @@ class ADCBoard {
     return comm;
   }
 
-  // chop = true
   float setConversionTime(int channel, float time_us) {
     return setConversionTimeFloat(channel, time_us,
                                   isMoreThanOneChannelActive());
   }
 
-  // chop = true
   float setConversionTimeFloat(int channel, float time_us,
                                bool moreThanOneChannelActive) {
     return setConversionTime(
-        channel, true,
+        channel, chopEnabled,
         calculateFilterWord(time_us, true, moreThanOneChannelActive),
         moreThanOneChannelActive);
   }

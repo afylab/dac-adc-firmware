@@ -72,6 +72,8 @@ class ADCController {
     registerMemberFunction(setChFullScaleCalibration, "SET_FULL_SCALE_CAL");
     registerMemberFunction(resetToPreviousConversionTimesSerial,"RESET_MAINTAIN");
     registerMemberFunction(hardResetAllADCBoards, "HARD_RESET");
+    registerMemberFunction(setChopping, "SET_CHOP");
+    registerMemberFunction(getChopping, "GET_CHOP");
   }
 
   inline static void addBoard(int cs_pin, int data_ready,
@@ -110,6 +112,17 @@ class ADCController {
   inline static float getVoltage(int channel_index) {
     return adc_boards[getBoardIndexFromGlobalIndex(channel_index)].readVoltage(
         getChannelIndexFromGlobalIndex(channel_index));
+  }
+
+  inline static OperationResult setChopping(bool chop) {
+    for (auto& board : adc_boards) {
+      board.chopEnabled = chop;
+    }
+    return OperationResult::Success();
+  }
+
+  inline static OperationResult getChopping() {
+    return adc_boards[0].chopEnabled ? OperationResult::Success("true") : OperationResult::Success("false");
   }
 
   inline static OperationResult getRevisionRegister(int board_index) {
