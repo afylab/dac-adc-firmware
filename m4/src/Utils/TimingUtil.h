@@ -38,6 +38,16 @@ struct TimingUtil {
     delayMicroseconds(5);
   }
 
+  inline static void stopAndResetAdcTimer() {
+    TIM8->CR1 &= ~TIM_CR1_CEN;  // Stop the timer (clear Counter Enable bit)
+    TIM8->CNT = 0;              // Reset counter to zero
+  }
+
+  inline static void startAdcTimer() {
+    TIM8->CR1 |= TIM_CR1_CEN;   // Start the timer (set Counter Enable bit)
+  }
+
+
   inline static void setupTimerOnlyDac(uint32_t period_us) {
     resetTimers();
 
