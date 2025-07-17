@@ -929,9 +929,10 @@ class God {
     }
 
     // Setup timers for DAC and ADC events
-    TimingUtil::setupTimersDacLed(dac_interval_us, dac_settling_time_us);
-    TimingUtil::stopAndResetAdcTimer();
+    TimingUtil::setupTimerOnlyDac(dac_interval_us);
     TimingUtil::dacFlag = false;
+
+    bool done = false;
 
     // Main event loop using interrupt-based timing
     while (currentLoop < numLoops && !getStopFlag()) {
@@ -953,23 +954,24 @@ class God {
         TimingUtil::dacFlag = false;
         currentDacStep++;
         currentStep++;
-        
+
         // Check if we've completed a full sweep of voltages for this loop
         if (currentStep >= numDacStepsPerLoop) {
           currentStep = 0; // Reset to beginning of voltage list for next loop
-          TimingUtil::startAdcTimer();
+          done = true; // Mark that we need to read ADC after settling
         }
       }
       
       // Handle ADC flag - time to read ADC after settling
-      if (TimingUtil::adcFlag == adcMask) {
+      if (done) {
+        done = false; // Reset done flag for next ADC read
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::beginAdcTransaction();
         #endif
         for (int i = 0; i < numAdcChannels; i++) {
           double total = 0.0;
           for (int j = 0; j < numAdcAverages; j++) {
-            total += ADCController::getVoltageDataNoTransaction(adcChannels[i]);
+            total += ADCController::getVoltage(adcChannels[i]);
           }
           packets[i] = total * numAdcAveragesInv;
         }
@@ -985,7 +987,6 @@ class God {
         currentAdcReads++;
         currentLoop++; // Each ADC read marks completion of one loop
       }
-      TimingUtil::stopAndResetAdcTimer();
     }
 
     // Clean up timers
