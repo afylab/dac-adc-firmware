@@ -957,7 +957,7 @@ class God {
         // Check if we've completed a full sweep of voltages for this loop
         if (currentStep >= numDacStepsPerLoop) {
           currentStep = 0; // Reset to beginning of voltage list for next loop
-          TimingUtil::stopAndResetAdcTimer();
+          TimingUtil::startAdcTimer();
         }
       }
       
