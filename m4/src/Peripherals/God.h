@@ -908,7 +908,6 @@ class God {
 
     // Track current position in voltage lists and loop
     int currentLoop = 0;
-    int currentStep = 0;
     int totalDacSteps = numLoops * numDacStepsPerLoop;
     int currentDacStep = 0;
     int currentAdcReads = 0;
@@ -918,7 +917,6 @@ class God {
       DACController::setVoltageNoTransactionNoLdac(dacChannels[i], dacVoltageLists[i][0]);
     }
     currentDacStep++;
-    currentStep = 1; // We've already set step 0
 
     // Start ADC continuous conversion
     for (int i = 0; i < numAdcChannels; i++) {
@@ -944,22 +942,22 @@ class God {
         PeripheralCommsController::beginDacTransaction();
         #endif
         for (int i = 0; i < numDacChannels; i++) {
-          float voltage = dacVoltageLists[i][currentStep];
+          float voltage = dacVoltageLists[i][currentDacStep];
           DACController::setVoltageNoTransactionNoLdac(dacChannels[i], voltage);
         }
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::endTransaction();
         #endif
         
-        TimingUtil::dacFlag = false;
-        currentDacStep++;
-        currentStep++;
 
         // Check if we've completed a full sweep of voltages for this loop
-        if (currentStep >= numDacStepsPerLoop) {
-          currentStep = 0; // Reset to beginning of voltage list for next loop
+        if (currentDacStep >= numDacStepsPerLoop) {
+          currentDacStep = 0; // Reset to beginning of voltage list for next loop
           done = true; // Mark that we need to read ADC after settling
         }
+        
+        TimingUtil::dacFlag = false;
+        currentDacStep++;
       }
       
       // Handle ADC flag - time to read ADC after settling
