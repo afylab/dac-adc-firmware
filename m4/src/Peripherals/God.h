@@ -660,6 +660,9 @@ class God {
       //m4SendFloat(&cycles, 1); // send cycles for debugging
 
       if (TimingUtil::dacFlag && dacIncrements < numSteps) {
+        #ifdef __NEW_SHIELD__
+        digitalWrite(GPIO_0, LOW);
+        #endif
         #if !defined(__NEW_SHIELD__)
         PeripheralCommsController::beginDacTransaction();
         #endif
@@ -678,6 +681,9 @@ class God {
 
       }
       if (TimingUtil::adcFlag == adcMask) {
+        #ifdef __NEW_SHIELD__
+        digitalWrite(GPIO_0, HIGH);
+        #endif
         // uint32_t start = DWT->CYCCNT;
         // cycles =  -1.0 * static_cast<float>(DWT->CYCCNT - start);
         // m4SendFloat(&cycles, 1);
@@ -765,7 +771,6 @@ class God {
     int numDacStepsPerLoop = static_cast<int>(args[idx++]);
     int numAdcAverages = static_cast<int>(args[idx++]);
     uint32_t dac_interval_us = static_cast<uint32_t>(args[idx++]);
-    uint32_t dac_settling_time_us = static_cast<uint32_t>(args[idx++]);
 
     // Check for valid channel counts
     if (numDacChannels < 1 || numAdcChannels < 1 || numLoops < 1 || numDacStepsPerLoop < 1 || numAdcAverages < 1) {
@@ -807,7 +812,7 @@ class God {
     // Call the base function
     OperationResult result = AWGBufferRampBase(
       numDacChannels, numAdcChannels, numLoops, numDacStepsPerLoop, numAdcAverages,
-      dac_interval_us, dac_settling_time_us, dacChannels, dacVoltageLists, adcChannels
+      dac_interval_us, dacChannels, dacVoltageLists, adcChannels
     );
 
     // Clean up allocated memory
@@ -821,9 +826,9 @@ class God {
 
   static OperationResult AWGBufferRampBase(
       int numDacChannels, int numAdcChannels, int numLoops, int numDacStepsPerLoop, int numAdcAverages,
-      uint32_t dac_interval_us, uint32_t dac_settling_time_us, int* dacChannels,
+      uint32_t dac_interval_us, int* dacChannels,
       float** dacVoltageLists, int* adcChannels) {
-    if (dac_settling_time_us < 1 || dac_interval_us < 1) {
+    if (dac_interval_us < 1) {
       return OperationResult::Failure("Invalid interval or settling time");
     }
     if (numAdcAverages < 1) {
@@ -879,13 +884,8 @@ class God {
     }
     float maxConvTime = *std::max_element(std::begin(convTimeSum), std::end(convTimeSum));
     uint32_t totalDacSweepTime = numDacStepsPerLoop * dac_interval_us;
-    if(maxConvTime*numAdcAverages + dac_settling_time_us + 180 >= totalDacSweepTime) {
+    if(maxConvTime*numAdcAverages + 180 >= totalDacSweepTime) {
       return OperationResult::Failure("DAC sweep time is too short for specified ADC conversion time, please increase dac_interval_us or reduce numDacStepsPerLoop");
-    }
-
-    //We will also throw an error if the settling time is too short:
-    if (dac_settling_time_us < 100) {
-      return OperationResult::Failure("DAC settling time is too short, please increase it");
     }
 
     for (int i = 0; i < numAdcBoards; i++) {

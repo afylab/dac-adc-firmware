@@ -29,6 +29,13 @@ const int dac_cs_pins[NUM_DAC_CHANNELS] = {23,24,25,26,27,28,29,30,31,32,33,34,3
 const int reset[NUM_ADC_BOARDS] = {43,44};//,45,46};
 const int drdy[NUM_ADC_BOARDS] = {47,48};//,49,50};
 
+#define GPIO_0 52
+#define GPIO_1 53
+#define GPIO_2 5
+#define GPIO_3 4
+
+
+
 #ifdef __NEW_DAC_ADC__
 #define adc_sync 51
 #endif
