@@ -373,13 +373,26 @@ class ADCBoard {
   }
 
   void restoreCalibrationFromFlash() {
+    if (!isCalibrationReady()) {
+      return;
+    }
+
     CalibrationData data;
     m4ReceiveCalibrationData(data);
+
+    if (!data.adcCalibrated) {
+      return;
+    }
+
     int boardIndex = getBoardIndex();
 
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       setZeroScaleCalibration(i, data.adc_offset[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + i]);
-      setFullScaleCalibration(i, data.adc_gain[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + i]);
+
+      uint32_t fullScale = data.adc_gain[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + i];
+      if (fullScale != 0) {
+        setFullScaleCalibration(i, fullScale);
+      }
     }
   }
 

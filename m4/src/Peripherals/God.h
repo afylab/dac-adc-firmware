@@ -26,12 +26,28 @@ class God {
     registerMemberFunctionVector(timeSeriesAdcRead, "TIME_SERIES_ADC_READ");
     registerMemberFunction(dacChannelCalibration, "DAC_CH_CAL");
     registerMemberFunctionVector(boxcarAverageRamp, "BOXCAR_BUFFER_RAMP");
+    registerMemberFunction(hardResetCalibrationToDefaults, "HARD_RESET_CALIBRATION");
   }
 
   inline static OperationResult initialize() {
     DACController::initialize();
     ADCController::initialize();
     return OperationResult::Success("INITIALIZATION COMPLETE");
+  }
+
+  inline static OperationResult hardResetCalibrationToDefaults() {
+    CalibrationData calibrationData;
+    m4ReceiveCalibrationData(calibrationData);
+    for (int i = 0; i < NUM_DAC_CHANNELS; i++) {
+      calibrationData.gain[i] = 1.0f;
+      calibrationData.offset[i] = 0.0f;
+      calibrationData.adc_offset[i] = 0x800000; // Default ADC offset
+      calibrationData.adc_gain[i] = 0x200000; // Default ADC gain
+    }
+    calibrationData.adcCalibrated = false;
+    m4SendCalibrationData(calibrationData);
+
+    return OperationResult::Success("Calibration data reset to defaults");
   }
 
 

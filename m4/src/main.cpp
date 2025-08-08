@@ -84,7 +84,11 @@ void setup() {
   } else {
     for (int i=0; i<NUM_ADC_BOARDS * NUM_CHANNELS_PER_ADC_BOARD; i++) {
       ADCController::setChZeroScaleCalibration(i, calibrationData.adc_offset[i]);
-      ADCController::setChFullScaleCalibration(i, calibrationData.adc_gain[i]);
+
+      if (calibrationData.adc_gain[i] != 0) {
+        ADCController::setChFullScaleCalibration(i, calibrationData.adc_gain[i]);
+      }
+
     }
   }
 }
