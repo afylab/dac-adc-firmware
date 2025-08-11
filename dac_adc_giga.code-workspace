@@ -6,5 +6,13 @@
     {
       "path": "m7"
     }
-  ]
+  ],
+  "settings": {
+    "files.associations": {
+      "mstd_iterator": "cpp",
+      "array": "cpp",
+      "string": "cpp",
+      "string_view": "cpp"
+    }
+  }
 }

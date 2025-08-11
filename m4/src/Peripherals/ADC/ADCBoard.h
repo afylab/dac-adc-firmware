@@ -411,10 +411,12 @@ class ADCBoard {
     }
 
     //Set I/O Register such that P1 bit is set as input and SYNC pin function is enabled
+    #ifdef __NEW_DAC_ADC__
     byte data[2];
     data[0] = WRITE | ADDR_IO;
     data[1] = 0b00010001;
     commsController.transferADC(data, 2);
+    #endif
 
     restoreCalibrationFromFlash();
   }
