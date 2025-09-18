@@ -7,6 +7,15 @@
 #include "FunctionRegistry/FunctionRegistry.h"
 #include "Peripherals/OperationResult.h"
 
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "UNKNOWN"
+#endif
+
+#ifndef STRINGIZE
+#define STRINGIZE(x) #x
+#define STRINGIZE_VALUE_OF(x) STRINGIZE(x)
+#endif
+
 struct UserIOHandler {
   static void setup() {
     registerMemberFunction(nop, "NOP");
@@ -14,6 +23,11 @@ struct UserIOHandler {
     registerMemberFunction(rdy, "*RDY?");
     registerMemberFunction(serialNumber, "SERIAL_NUMBER");
     registerMemberFunction(getEnvironment, "GET_ENVIRONMENT");
+    registerMemberFunction(getFirmwareVersion, "GET_FIRMWARE_VERSION");
+  }
+
+  static OperationResult getFirmwareVersion() {
+    return OperationResult::Success(STRINGIZE_VALUE_OF(__FIRMWARE_VERSION__));
   }
 
   static OperationResult nop() { return OperationResult::Success("NOP"); }
