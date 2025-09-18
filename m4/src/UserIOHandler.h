@@ -28,9 +28,9 @@ struct UserIOHandler {
 
   static OperationResult getFirmwareVersion() {
     #ifdef __FIRMWARE_VERSION_STRING__
-    return OperationResult::Success(__FIRMWARE_VERSION_STRING__);
+    return OperationResult::Success(STRINGIZE_VALUE_OF(__FIRMWARE_VERSION_STRING__));
     #endif
-    return OperationResult::Success(STRINGIZE_VALUE_OF(__FIRMWARE_VERSION__));
+    return OperationResult::Success(String("Commit Hash: ") + STRINGIZE_VALUE_OF(__FIRMWARE_VERSION__));
   }
 
   static OperationResult nop() { return OperationResult::Success("NOP"); }
