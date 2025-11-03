@@ -17,6 +17,17 @@ class DACController {
   inline static std::vector<DACChannel> dac_channels;
 
  public:
+  // Setter functions for global voltage limits
+  inline static OperationResult setUpperLimit(float limit) {
+    DACLimits::upper_voltage_limit = limit;
+    return OperationResult::Success("UPPER_LIMIT_SET_TO_" + String(limit, 6));
+  }
+
+  inline static OperationResult setLowerLimit(float limit) {
+    DACLimits::lower_voltage_limit = limit;
+    return OperationResult::Success("LOWER_LIMIT_SET_TO_" + String(limit, 6));
+  }
+
   inline static void initializeRegistry() {
     registerMemberFunction(setVoltage, "SET");
     registerMemberFunction(getVoltage, "GET_DAC");
@@ -28,6 +39,8 @@ class DACController {
     registerMemberFunction(autoRamp2, "RAMP2");
     registerMemberFunctionVector(autoRampN, "RAMP_N");
     registerMemberFunction(toggleLdacTest, "TOGGLE_LDAC");
+    registerMemberFunction(setUpperLimit, "SET_UPPER_LIMIT");
+    registerMemberFunction(setLowerLimit, "SET_LOWER_LIMIT");
   }
 
   inline static void addChannel(int cs_pin) {
@@ -68,6 +81,9 @@ class DACController {
       return OperationResult::Failure("Invalid channel index " +
                                       String(channel_index));
     }
+    // Fast clamp voltage to global limits
+    voltage = DACLimits::clampVoltage(voltage);
+    
     DACChannel dac_channel = dac_channels[channel_index];
     if (voltage < dac_channel.getLowerBound() ||
         voltage > dac_channel.getUpperBound()) {
@@ -84,6 +100,9 @@ class DACController {
     if (!isChannelIndexValid(channel_index)) {
       return;
     }
+    // Fast clamp voltage to global limits
+    voltage = DACLimits::clampVoltage(voltage);
+    
     DACChannel dac_channel = dac_channels[channel_index];
     if (voltage < dac_channel.getLowerBound() ||
         voltage > dac_channel.getUpperBound()) {

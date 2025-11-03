@@ -42,6 +42,9 @@ class DACChannel {
   }
 
   float setVoltage(float v) {
+    // Super fast low-level clamp to global limits
+    v = DACLimits::clampVoltage(v);
+    
     byte b1;
     byte b2;
     byte b3;
@@ -61,6 +64,9 @@ class DACChannel {
   }
 
   void setVoltageNoTransactionNoLdac(float v) {
+    // Super fast low-level clamp to global limits
+    v = DACLimits::clampVoltage(v);
+    
     byte b1;
     byte b2;
     byte b3;

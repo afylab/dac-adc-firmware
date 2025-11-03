@@ -47,3 +47,15 @@ const static SPISettings DAC_SPI_SETTINGS(22000000, MSBFIRST, SPI_MODE1 );
 const static SPISettings ADC_SPI_SETTINGS(8000000, MSBFIRST, SPI_MODE0);
 #endif
 
+// Global DAC voltage limits for fast clamping
+namespace DACLimits {
+  inline float upper_voltage_limit = 10.0;
+  inline float lower_voltage_limit = -10.0;
+  
+  // Super fast inline clamp function using ternary operators
+  inline float clampVoltage(float v) {
+    return (v > upper_voltage_limit) ? upper_voltage_limit : 
+           ((v < lower_voltage_limit) ? lower_voltage_limit : v);
+  }
+}
+
