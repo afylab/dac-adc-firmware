@@ -17,15 +17,21 @@ class DACController {
   inline static std::vector<DACChannel> dac_channels;
 
  public:
-  // Setter functions for global voltage limits
-  inline static OperationResult setUpperLimit(float limit) {
-    DACLimits::upper_voltage_limit = limit;
-    return OperationResult::Success("UPPER_LIMIT_SET_TO_" + String(limit, 6));
+  // Setter functions for channel-specific voltage limits
+  inline static OperationResult setUpperLimit(int channel, float limit) {
+    if (!isChannelIndexValid(channel)) {
+      return OperationResult::Failure("Invalid channel index " + String(channel));
+    }
+    DACLimits::upper_voltage_limit[channel] = limit;
+    return OperationResult::Success("CH" + String(channel) + " UPPER LIMIT SET TO " + String(limit, 6) + " V");
   }
 
-  inline static OperationResult setLowerLimit(float limit) {
-    DACLimits::lower_voltage_limit = limit;
-    return OperationResult::Success("LOWER_LIMIT_SET_TO_" + String(limit, 6));
+  inline static OperationResult setLowerLimit(int channel, float limit) {
+    if (!isChannelIndexValid(channel)) {
+      return OperationResult::Failure("Invalid channel index " + String(channel));
+    }
+    DACLimits::lower_voltage_limit[channel] = limit;
+    return OperationResult::Success("CH" + String(channel) + " LOWER LIMIT SET TO " + String(limit, 6) + " V");
   }
 
   inline static void initializeRegistry() {
@@ -44,7 +50,8 @@ class DACController {
   }
 
   inline static void addChannel(int cs_pin) {
-    DACChannel newChannel = DACChannel(cs_pin);
+    int channel_index = dac_channels.size();
+    DACChannel newChannel = DACChannel(cs_pin, channel_index);
     dac_channels.push_back(newChannel);
   }
 
@@ -56,6 +63,9 @@ class DACController {
   }
 
   inline static void setup() {
+    // Initialize channel-specific voltage limits
+    DACLimits::initializeLimits();
+    
     pinMode(ldac, OUTPUT);
     digitalWrite(ldac, HIGH);
     initializeRegistry();
@@ -81,17 +91,19 @@ class DACController {
       return OperationResult::Failure("Invalid channel index " +
                                       String(channel_index));
     }
-    // Fast clamp voltage to global limits
-    voltage = DACLimits::clampVoltage(voltage);
     
     DACChannel dac_channel = dac_channels[channel_index];
-    if (voltage < dac_channel.getLowerBound() ||
-        voltage > dac_channel.getUpperBound()) {
+    if (voltage < dac_channel.getHardwareLowerBound() ||
+        voltage > dac_channel.getHardwareUpperBound()) {
       return OperationResult::Failure("Voltage out of bounds for DAC " +
-                                      String(channel_index) + " (" + String(voltage) + " V must be between " + String(dac_channel.getLowerBound()) + " and " + String(dac_channel.getUpperBound()) + " V)");
+                                      String(channel_index) + " (" + String(voltage) + " V must be between " + String(dac_channel.getHardwareLowerBound()) + " and " + String(dac_channel.getHardwareUpperBound()) + " V)");
     }
 
+    // Clamping happens at low-level in DACChannel::setVoltage()
     float v = dac_channel.setVoltage(voltage);
+    if (isnan(v)) {
+      return OperationResult::Failure("Voltage out of bounds for DAC " + String(channel_index));
+    }
     return OperationResult::Success("DAC " + String(channel_index) +
                                     " UPDATED TO " + String(v, 6) + " V");
   }
@@ -100,12 +112,10 @@ class DACController {
     if (!isChannelIndexValid(channel_index)) {
       return;
     }
-    // Fast clamp voltage to global limits
-    voltage = DACLimits::clampVoltage(voltage);
     
     DACChannel dac_channel = dac_channels[channel_index];
-    if (voltage < dac_channel.getLowerBound() ||
-        voltage > dac_channel.getUpperBound()) {
+    if (voltage < dac_channel.getHardwareLowerBound() ||
+        voltage > dac_channel.getHardwareUpperBound()) {
       return;
     }
 
@@ -166,14 +176,18 @@ class DACController {
     if (!isChannelIndexValid(channel)) {
       return -1;
     }
-    return dac_channels[channel].getLowerBound();
+    // Return the most restrictive bound between calibrated limits and global limits
+    float calibratedHardwareLower = dac_channels[channel].getHardwareLowerBound();
+    return max(calibratedHardwareLower, DACLimits::lower_voltage_limit[channel]);
   }
 
   inline static float getUpperBound(int channel) {
     if (!isChannelIndexValid(channel)) {
       return -1;
     }
-    return dac_channels[channel].getUpperBound();
+    // Return the most restrictive bound between calibrated limits and global limits
+    float calibratedHardwareUpper = dac_channels[channel].getHardwareUpperBound();
+    return min(calibratedHardwareUpper, DACLimits::upper_voltage_limit[channel]);
   }
 
   inline static OperationResult sendCode(int channel, int code) {
@@ -260,8 +274,8 @@ class DACController {
       }
       // Validate voltage bounds.
       DACChannel dacCh = dac_channels[ch];
-      if (v0 < dacCh.getLowerBound() || v0 > dacCh.getUpperBound() ||
-          vf < dacCh.getLowerBound() || vf > dacCh.getUpperBound()) {
+      if (v0 < dacCh.getHardwareLowerBound() || v0 > dacCh.getHardwareUpperBound() ||
+          vf < dacCh.getHardwareLowerBound() || vf > dacCh.getHardwareUpperBound()) {
         delete[] rampParams;
         return OperationResult::Failure("Voltage out of bounds for DAC " + String(ch));
       }

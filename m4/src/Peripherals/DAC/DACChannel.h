@@ -11,6 +11,7 @@ class DACChannel {
   float gain_error;
   float offset_error;
   int cs_pin;
+  int channel_index;
   float voltage_upper_bound;
   float voltage_lower_bound;
   float full_scale = 10.0;
@@ -18,12 +19,21 @@ class DACChannel {
   PeripheralCommsController commsController;
 
  public:
-  DACChannel(int cs_pin) : commsController(cs_pin) {
+  DACChannel(int cs_pin, int channel_index = -1) : commsController(cs_pin) {
     this->cs_pin = cs_pin;
+    this->channel_index = channel_index;
     offset_error = 0.0;
     gain_error = 1.0;
     voltage_upper_bound = full_scale * gain_error + offset_error;
     voltage_lower_bound = -full_scale * gain_error + offset_error;
+  }
+  
+  void setChannelIndex(int index) {
+    this->channel_index = index;
+  }
+  
+  int getChannelIndex() const {
+    return channel_index;
   }
 
   // initialize is the command INITIALIZE, setup is called in main::setup
@@ -42,12 +52,13 @@ class DACChannel {
   }
 
   float setVoltage(float v) {
-    // Super fast low-level clamp to global limits
-    v = DACLimits::clampVoltage(v);
-    
     byte b1;
     byte b2;
     byte b3;
+    
+    if (v > DACLimits::upper_voltage_limit[channel_index] || v < DACLimits::lower_voltage_limit[channel_index]) {
+      return NAN;
+    }
 
     voltageToDecimal(v / gain_error - offset_error, &b1, &b2, &b3);
 
@@ -64,12 +75,13 @@ class DACChannel {
   }
 
   void setVoltageNoTransactionNoLdac(float v) {
-    // Super fast low-level clamp to global limits
-    v = DACLimits::clampVoltage(v);
-    
     byte b1;
     byte b2;
     byte b3;
+
+    if (v > DACLimits::upper_voltage_limit[channel_index] || v < DACLimits::lower_voltage_limit[channel_index]) {
+      return;
+    }
 
     voltageToDecimal(v / gain_error - offset_error, &b1, &b2, &b3);
 
@@ -93,9 +105,9 @@ class DACChannel {
     voltage_lower_bound = -full_scale * gain_error + offset_error;
   }
 
-  float getLowerBound() { return voltage_lower_bound; }
+  float getHardwareLowerBound() { return voltage_lower_bound; }
 
-  float getUpperBound() { return voltage_upper_bound; }
+  float getHardwareUpperBound() { return voltage_upper_bound; }
 
   float getOffsetError() { return offset_error; }
   float getGainError() { return gain_error; }

@@ -299,6 +299,26 @@ class God {
       return OperationResult::Failure("Invalid number of channels");
     }
 
+    // Check voltage bounds before executing ramp
+    for (int i = 0; i < numDacChannels; i++) {
+      int ch = dacChannels[i];
+      float lowerBound = DACController::getLowerBound(ch);
+      float upperBound = DACController::getUpperBound(ch);
+      
+      if (dacV0s[i] < lowerBound || dacV0s[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " start voltage " + String(dacV0s[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
+      if (dacVfs[i] < lowerBound || dacVfs[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " end voltage " + String(dacVfs[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
+    }
+
     int steps = 0;
     int x = 0;
 
@@ -555,6 +575,26 @@ class God {
     }
     if (numDacChannels < 1 || numAdcChannels < 1) {
       return OperationResult::Failure("Invalid number of channels");
+    }
+
+    // Check voltage bounds before executing ramp
+    for (int i = 0; i < numDacChannels; i++) {
+      int ch = dacChannels[i];
+      float lowerBound = DACController::getLowerBound(ch);
+      float upperBound = DACController::getUpperBound(ch);
+      
+      if (dacV0s[i] < lowerBound || dacV0s[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " start voltage " + String(dacV0s[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
+      if (dacVfs[i] < lowerBound || dacVfs[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " end voltage " + String(dacVfs[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
     }
     
     double packets[numAdcChannels];
@@ -856,6 +896,23 @@ class God {
     if (numDacChannels < 1 || numAdcChannels < 1) {
       return OperationResult::Failure("Invalid number of channels");
     }
+
+    // Check voltage bounds before executing ramp
+    for (int i = 0; i < numDacChannels; i++) {
+      int ch = dacChannels[i];
+      float lowerBound = DACController::getLowerBound(ch);
+      float upperBound = DACController::getUpperBound(ch);
+      
+      for (int j = 0; j < numDacStepsPerLoop; j++) {
+        float voltage = dacVoltageLists[i][j];
+        if (voltage < lowerBound || voltage > upperBound) {
+          return OperationResult::Failure("DAC " + String(ch) + 
+                                          " voltage[" + String(j) + "] = " + String(voltage, 6) + 
+                                          "V out of bounds [" + String(lowerBound, 6) + 
+                                          ", " + String(upperBound, 6) + "]");
+        }
+      }
+    }
     
     double packets[numAdcChannels];
     double numAdcAveragesInv = 1.0 / static_cast<double>(numAdcAverages);
@@ -1106,6 +1163,38 @@ class God {
 
     uint32_t dacPeriod_us = (numAdcMeasuresPerDacStep + numAdcConversionSkips) *
                             (actualConversionTime_us + 5) * numAdcChannels * numAdcAverages;
+
+    // Check voltage bounds before executing ramp (both calibrated bounds AND global limits)
+    for (int i = 0; i < numDacChannels; i++) {
+      int ch = dacChannels[i];
+      float lowerBound = DACController::getLowerBound(ch);
+      float upperBound = DACController::getUpperBound(ch);
+      
+      if (dacV0_1[i] < lowerBound || dacV0_1[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " start voltage 1 " + String(dacV0_1[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
+      if (dacVf_1[i] < lowerBound || dacVf_1[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " end voltage 1 " + String(dacVf_1[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
+      if (dacV0_2[i] < lowerBound || dacV0_2[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " start voltage 2 " + String(dacV0_2[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
+      if (dacVf_2[i] < lowerBound || dacVf_2[i] > upperBound) {
+        return OperationResult::Failure("DAC " + String(ch) + 
+                                        " end voltage 2 " + String(dacVf_2[i], 6) + 
+                                        "V out of bounds [" + String(lowerBound, 6) + 
+                                        ", " + String(upperBound, 6) + "]");
+      }
+    }
 
     setStopFlag(false);
     PeripheralCommsController::dataLedOn();
