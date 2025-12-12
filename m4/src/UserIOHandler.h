@@ -63,37 +63,126 @@ struct UserIOHandler {
     return OperationResult::Success(serial_number + 17);
   }
 
-  static std::vector<String> query_memory() {
-    std::vector<String> comm;
-    if (!m4HasCharMessage()) {
-      return comm;
-    }
+  // Read one complete command line from shared memory.
+  //
+  // Returns true only when a full command is available in `out`.
+  // For fragmented messages, this will return false until all fragments arrive.
+  static bool readCommandLine(String& out) {
+    // NOTE:
+    // - The M7 forwards user commands to the M4 via the shared-memory char ring.
+    // - That ring only supports ~251 payload bytes per frame.
+    // - For large commands (e.g. AWG with many points), the M7 fragments the
+    //   command into multiple frames with a small binary header.
+    //
+    // This function reassembles those fragments and returns the full command
+    // line *only when a full command is ready*.
+
+    out = "";
+    if (!m4HasCharMessage()) return false;
+
+    // Fragment reassembly state (persists across loop iterations).
+    static bool assembling = false;
+    static uint16_t next_seq = 0;
+    static uint32_t expected_total = 0;
+    static String assembled;
+
+    auto read_le16 = [](const uint8_t* p) -> uint16_t {
+      return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
+    };
+    auto read_le32 = [](const uint8_t* p) -> uint32_t {
+      return static_cast<uint32_t>(p[0]) |
+             (static_cast<uint32_t>(p[1]) << 8) |
+             (static_cast<uint32_t>(p[2]) << 16) |
+             (static_cast<uint32_t>(p[3]) << 24);
+    };
 
     char buffer[CHAR_BUFFER_SIZE];
-    size_t size;
+    size_t size = sizeof(buffer);
     if (!m4ReceiveChar(buffer, size)) {
-      return comm;  // Return empty vector if we couldn't get the data
+      return false;
     }
 
-    String input = String(buffer, size);  // Create String with exact size
-    input.trim();
+    constexpr size_t kFragHeaderSize = 12;
+    const uint8_t* u8 = reinterpret_cast<const uint8_t*>(buffer);
+    const bool is_frag = (size >= kFragHeaderSize &&
+                          u8[0] == 'S' && u8[1] == 'M' && u8[2] == 'C' && u8[3] == '1');
 
-    int startPos = 0;
-    int commaPos = input.indexOf(',');
-    while (commaPos != -1) {
-      comm.push_back(input.substring(startPos, commaPos));
-      startPos = commaPos + 1;
-      commaPos = input.indexOf(',', startPos);
+    if (!is_frag) {
+      // Legacy single-frame command.
+      assembling = false;
+      next_seq = 0;
+      expected_total = 0;
+      assembled = "";
+      out = String(buffer, size);
+      return true;
+    } else {
+      const uint8_t flags = u8[4];
+      const uint8_t version = u8[5];
+      const uint16_t seq = read_le16(&u8[6]);
+      const uint32_t total_len = read_le32(&u8[8]);
+
+      const bool is_first = (flags & 0x01) != 0;
+      const bool is_last  = (flags & 0x02) != 0;
+
+      if (version != 1 || total_len == 0) {
+        // Bad header; drop assembly state.
+        assembling = false;
+        next_seq = 0;
+        expected_total = 0;
+        assembled = "";
+        return false;
+      }
+
+      if (is_first) {
+        assembling = true;
+        next_seq = 0;
+        expected_total = total_len;
+        assembled = "";
+        assembled.reserve(expected_total);
+      }
+
+      if (!assembling) {
+        // We got a mid-stream fragment without a start; drop it.
+        return false;
+      }
+
+      if (seq != next_seq || total_len != expected_total) {
+        // Missing/out-of-order fragment; reset.
+        assembling = false;
+        next_seq = 0;
+        expected_total = 0;
+        assembled = "";
+        return false;
+      }
+
+      const size_t payload_len = (size > kFragHeaderSize) ? (size - kFragHeaderSize) : 0;
+      if (payload_len > 0) {
+        // Append payload bytes (ASCII command text), but never exceed expected_total.
+        const uint32_t already = static_cast<uint32_t>(assembled.length());
+        if (already < expected_total) {
+          const uint32_t remaining = expected_total - already;
+          const uint32_t to_append = (payload_len < remaining) ? static_cast<uint32_t>(payload_len) : remaining;
+          assembled.concat(reinterpret_cast<const char*>(&u8[kFragHeaderSize]),
+                           static_cast<unsigned int>(to_append));
+        }
+      }
+
+      next_seq++;
+
+      if (!(is_last && assembled.length() >= expected_total)) {
+        // Not complete yet.
+        return false;
+      }
+
+      out = assembled;
+
+      // Reset assembly state for next command.
+      assembling = false;
+      next_seq = 0;
+      expected_total = 0;
+      assembled = "";
+      return true;
     }
-    comm.push_back(input.substring(startPos));
-
-    return comm;
-  }
-
-  static bool isValidFloat(const String& str) {
-    char* endPtr;
-    strtod(str.c_str(), &endPtr);
-    return endPtr != str.c_str() && *endPtr == '\0' && str.length() > 0;
   }
 
   ///*************************************************************************///
@@ -101,49 +190,84 @@ struct UserIOHandler {
   /// The M4 processor cannot directly process information from UART, so in order
   /// to communicate with user serial input, the M7 takes the serial input and saves
   /// the command in a shared memory buffer.  Conversely, when the M4 needs to 
-  /// communicate with the M7, it stores data in the shared SRAM buffer.
+  /// communicate with the M7, it stores data in the shared memory buffer.
   ///*************************************************************************///
 
   static void handleUserIO() {
-    std::vector<String> comm;
-    if (m4HasCharMessage()) {
-      comm = query_memory();
+    // Drain as many frames as are available so the M7 doesn't block
+    // when sending a large fragmented command. We only execute when a full
+    // command has been reassembled by readCommandLine().
+    while (m4HasCharMessage()) {
+      String commandLine;
+      if (!readCommandLine(commandLine)) {
+        // Not enough fragments yet (or nothing to do).
+        return;
+      }
 
-      if (comm.size() > 0) {
-        String command = comm[0];
-        std::vector<float> args;
+      commandLine.trim();
+      if (commandLine.length() == 0) return;
 
-        for (size_t i = 1; i < comm.size(); ++i) {
-          if (!isValidFloat(comm[i])) {
+      // Parse:
+      //   COMMAND,arg1,arg2,arg3,...
+      // without allocating one String per argument (important for large AWGs).
+      int commaPos = commandLine.indexOf(',');
+      String command = (commaPos == -1) ? commandLine : commandLine.substring(0, commaPos);
+      command.trim();
+
+      std::vector<float> args;
+      if (commaPos != -1) {
+        const char* p = commandLine.c_str() + commaPos + 1;
+        while (*p != '\0') {
+          // Skip whitespace
+          while (*p == ' ' || *p == '\t') p++;
+          if (*p == '\0') break;
+
+          char* endPtr = nullptr;
+          double v = strtod(p, &endPtr);
+          if (endPtr == p) {
             m4SendChar("Invalid arguments!", 19);
             return;
           }
-          args.push_back(comm[i].toFloat());
-        }
-        OperationResult result =
-            OperationResult::Failure("Something went wrong!");
-        FunctionRegistry::ExecuteResult executeResult =
-            FunctionRegistry::execute(command, args, result);
+          args.push_back(static_cast<float>(v));
 
-        switch (executeResult) {
-          case FunctionRegistry::ExecuteResult::Success:
-            if (result.hasMessage()) {
-              size_t messageSize = result.getMessage().length() + 1;
-              char* message = new char[messageSize];
-              result.getMessage().toCharArray(message,
-                                              messageSize);
-              m4SendChar(message, messageSize);
-              delete[] message;
-            }
-            break;
-          case FunctionRegistry::ExecuteResult::ArgumentError:
-            m4SendChar("FAILURE: Argument error", 24);
-            break;
-          case FunctionRegistry::ExecuteResult::FunctionNotFound:
-            m4SendChar("FAILURE: Function not found", 28);
-            break;
+          p = endPtr;
+          while (*p == ' ' || *p == '\t') p++;
+
+          if (*p == ',') {
+            p++; // next token
+            continue;
+          }
+          if (*p == '\0' || *p == '\r' || *p == '\n') break;
+
+          // Unexpected character between numbers.
+          m4SendChar("Invalid arguments!", 19);
+          return;
         }
       }
+
+      OperationResult result = OperationResult::Failure("Something went wrong!");
+      FunctionRegistry::ExecuteResult executeResult =
+          FunctionRegistry::execute(command, args, result);
+
+      switch (executeResult) {
+        case FunctionRegistry::ExecuteResult::Success:
+          if (result.hasMessage()) {
+            size_t messageSize = result.getMessage().length() + 1;
+            char* message = new char[messageSize];
+            result.getMessage().toCharArray(message, messageSize);
+            m4SendChar(message, messageSize);
+            delete[] message;
+          }
+          break;
+        case FunctionRegistry::ExecuteResult::ArgumentError:
+          m4SendChar("FAILURE: Argument error", 24);
+          break;
+        case FunctionRegistry::ExecuteResult::FunctionNotFound:
+          m4SendChar("FAILURE: Function not found", 28);
+          break;
+      }
+
+      return; // execute only one full command per loop call
     }
   }
 };

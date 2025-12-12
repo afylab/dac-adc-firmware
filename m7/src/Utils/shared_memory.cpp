@@ -97,8 +97,10 @@ static uint32_t readUint32FromCharBuffer(CharCircularBuffer* buffer,
 // ---------------------------------------------------------------------------
 static bool charBufferSend(CharCircularBuffer* buffer, const char* data,
                            size_t length) {
-  // Enforce max message size
-  if (length > MAX_MESSAGE_SIZE) return false;
+  // NOTE: With a 256-byte ring, and a 4-byte length header, and the classic
+  // "leave one slot empty" rule, the true maximum payload per message is 251.
+  constexpr size_t kMaxCharPayload = (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
+  if (length > kMaxCharPayload) return false;
 
   // Compute available space in the ring buffer
   // We need to store 4 bytes for 'length' + the actual payload
@@ -171,7 +173,10 @@ static bool charBufferHasMessage(CharCircularBuffer* buffer) {
 // ---------------------------------------------------------------------------
 static bool floatBufferSend(FloatCircularBuffer* buffer, const float* data,
                             size_t length) {
-  if (length > MAX_MESSAGE_SIZE) return false;
+  // We store one extra float for 'length' and keep one slot empty to
+  // distinguish full vs empty.
+  constexpr size_t kMaxFloatPayload = (FLOAT_BUFFER_SIZE > 2) ? (FLOAT_BUFFER_SIZE - 2) : 0;
+  if (length > kMaxFloatPayload) return false;
 
   // How many float-slots are free?
   uint32_t available_space =
@@ -327,7 +332,90 @@ bool m4HasVoltageMessage() {
 //  M7 char functions
 // ---------------------------------------------------------------------------
 bool m7SendChar(const char* data, size_t length) {
-  return charBufferSend(&shared_memory->m7_to_m4_char_buffer, data, length);
+  // The underlying ring buffer is only CHAR_BUFFER_SIZE bytes and stores
+  // an additional 4-byte length prefix per frame (see charBufferSend()).
+  // That means the *true* maximum payload per frame is (CHAR_BUFFER_SIZE - 5).
+  //
+  // Large commands (e.g. AWG with many points) can exceed this, so we fragment
+  // them into multiple frames and let the M4 side reassemble.
+
+  constexpr size_t kCharFrameMaxPayload = (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0; // 251 for 256B ring
+  constexpr size_t kFragHeaderSize = 12; // "SMC1" + flags + ver + seq(u16) + total_len(u32)
+  constexpr uint8_t kFragVersion = 1;
+
+  auto write_le16 = [](uint8_t* p, uint16_t v) {
+    p[0] = static_cast<uint8_t>(v & 0xFF);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+  };
+  auto write_le32 = [](uint8_t* p, uint32_t v) {
+    p[0] = static_cast<uint8_t>(v & 0xFF);
+    p[1] = static_cast<uint8_t>((v >> 8) & 0xFF);
+    p[2] = static_cast<uint8_t>((v >> 16) & 0xFF);
+    p[3] = static_cast<uint8_t>((v >> 24) & 0xFF);
+  };
+
+  auto send_blocking = [&](const char* frame, size_t frame_len) -> bool {
+    // Block until there's space; this prevents dropping long commands.
+    // If the M4 stops draining the ring buffer, this would block here.
+    uint32_t start_ms = millis();
+    while (!charBufferSend(&shared_memory->m7_to_m4_char_buffer, frame, frame_len)) {
+      // Avoid hard-deadlocking the M7 if the M4 is busy/crashed and not draining.
+      if (millis() - start_ms > 5000) {
+        return false;
+      }
+      delay(1);
+    }
+    return true;
+  };
+
+  // Fast path: fits in a single ring-buffer frame.
+  if (length <= kCharFrameMaxPayload) {
+    return send_blocking(data, length);
+  }
+
+  // Fragmented path: fixed header + chunked payload.
+  if (kCharFrameMaxPayload <= kFragHeaderSize) {
+    // Should never happen with current sizes.
+    return false;
+  }
+
+  const size_t max_chunk = kCharFrameMaxPayload - kFragHeaderSize;
+  uint16_t seq = 0;
+  size_t offset = 0;
+
+  while (offset < length) {
+    const size_t remaining = length - offset;
+    const size_t chunk = (remaining < max_chunk) ? remaining : max_chunk;
+
+    const bool is_first = (offset == 0);
+    const bool is_last = (offset + chunk == length);
+
+    uint8_t frame[kCharFrameMaxPayload];
+    // Magic
+    frame[0] = 'S';
+    frame[1] = 'M';
+    frame[2] = 'C';
+    frame[3] = '1';
+    // Flags
+    frame[4] = static_cast<uint8_t>((is_first ? 0x01 : 0x00) | (is_last ? 0x02 : 0x00));
+    // Version
+    frame[5] = kFragVersion;
+    // Sequence
+    write_le16(&frame[6], seq);
+    // Total length of the full (reassembled) message
+    write_le32(&frame[8], static_cast<uint32_t>(length));
+    // Payload bytes
+    memcpy(&frame[kFragHeaderSize], data + offset, chunk);
+
+    if (!send_blocking(reinterpret_cast<const char*>(frame), kFragHeaderSize + chunk)) {
+      return false;
+    }
+
+    offset += chunk;
+    seq++;
+  }
+
+  return true;
 }
 bool m7ReceiveChar(char* data, size_t& length) {
   return charBufferReceive(&shared_memory->m4_to_m7_char_buffer, data, length);

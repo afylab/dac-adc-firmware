@@ -191,6 +191,10 @@ void setup()
 
   initDmaForM4();
   m7SendCalibrationData(calibrationData);
+
+  // Large AWG commands can be many kilobytes; increase the Serial read timeout
+  // so readStringUntil('\n') doesn't prematurely time out and truncate the line.
+  Serial.setTimeout(30000);
 }
 
 void loop()
@@ -213,7 +217,7 @@ void loop()
   if (m7HasCharMessage())
   {
     char response[CHAR_BUFFER_SIZE];
-    size_t size;
+    size_t size = sizeof(response);
     if (m7ReceiveChar(response, size))
     {
       if (size > 0)
@@ -227,7 +231,7 @@ void loop()
   if (m7HasFloatMessage())
   {
     float response[FLOAT_BUFFER_SIZE];
-    size_t size;
+    size_t size = FLOAT_BUFFER_SIZE;
     if (m7ReceiveFloat(response, size))
     {
       for (size_t i = 0; i < size; ++i)
@@ -241,7 +245,7 @@ void loop()
   if (m7HasVoltageMessage())
   {
     double response[VOLTAGE_BUFFER_SIZE];
-    size_t size;
+    size_t size = VOLTAGE_BUFFER_SIZE;
     if (m7ReceiveVoltage(response, size))
     {
       for (size_t i = 0; i < size; ++i)

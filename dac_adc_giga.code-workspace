@@ -5,6 +5,9 @@
     },
     {
       "path": "m7"
+    },
+    {
+      "path": "../../afyservers-py3"
     }
   ],
   "settings": {
