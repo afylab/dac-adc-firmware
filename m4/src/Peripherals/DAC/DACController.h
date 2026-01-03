@@ -17,7 +17,24 @@ class DACController {
   inline static std::vector<DACChannel> dac_channels;
 
  public:
-  // Setter functions for channel-specific voltage limits
+  
+ inline static void initializeRegistry() {
+    registerMemberFunction(setVoltage, "SET");
+    registerMemberFunction(getVoltage, "GET_DAC");
+    registerMemberFunction(sendCode, "SET_DAC_CODE");
+    registerMemberFunction(setFullScale, "FULL_SCALE");
+    registerMemberFunction(inquiryOSG, "INQUIRY_OSG");
+    registerMemberFunction(setOSG, "SET_OSG");
+    registerMemberFunction(autoRamp1, "RAMP1");
+    registerMemberFunction(autoRamp2, "RAMP2");
+    registerMemberFunctionVector(autoRampN, "RAMP_N");
+    registerMemberFunction(toggleLdacTest, "TOGGLE_LDAC");
+    registerMemberFunction(setUpperLimit, "SET_UPPER_LIMIT");
+    registerMemberFunction(setLowerLimit, "SET_LOWER_LIMIT");
+    registerMemberFunction(getUpperLimit, "GET_UPPER_LIMIT");
+    registerMemberFunction(getLowerLimit, "GET_LOWER_LIMIT");
+  }
+ 
   inline static OperationResult setUpperLimit(int channel, float limit) {
     if (!isChannelIndexValid(channel)) {
       return OperationResult::Failure("Invalid channel index " + String(channel));
@@ -34,19 +51,18 @@ class DACController {
     return OperationResult::Success("CH" + String(channel) + " LOWER LIMIT SET TO " + String(limit, 6) + " V");
   }
 
-  inline static void initializeRegistry() {
-    registerMemberFunction(setVoltage, "SET");
-    registerMemberFunction(getVoltage, "GET_DAC");
-    registerMemberFunction(sendCode, "SET_DAC_CODE");
-    registerMemberFunction(setFullScale, "FULL_SCALE");
-    registerMemberFunction(inquiryOSG, "INQUIRY_OSG");
-    registerMemberFunction(setOSG, "SET_OSG");
-    registerMemberFunction(autoRamp1, "RAMP1");
-    registerMemberFunction(autoRamp2, "RAMP2");
-    registerMemberFunctionVector(autoRampN, "RAMP_N");
-    registerMemberFunction(toggleLdacTest, "TOGGLE_LDAC");
-    registerMemberFunction(setUpperLimit, "SET_UPPER_LIMIT");
-    registerMemberFunction(setLowerLimit, "SET_LOWER_LIMIT");
+  inline static OperationResult getUpperLimit(int channel) {
+    if (!isChannelIndexValid(channel)) {
+      return OperationResult::Failure("Invalid channel index " + String(channel));
+    }
+    return OperationResult::Success(String(DACLimits::upper_voltage_limit[channel], 6));
+  }
+
+  inline static OperationResult getLowerLimit(int channel) {
+    if (!isChannelIndexValid(channel)) {
+      return OperationResult::Failure("Invalid channel index " + String(channel));
+    }
+    return OperationResult::Success(String(DACLimits::lower_voltage_limit[channel], 6));
   }
 
   inline static void addChannel(int cs_pin) {
