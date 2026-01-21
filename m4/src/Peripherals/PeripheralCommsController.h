@@ -146,10 +146,10 @@ class PeripheralCommsController {
         spi_regs->CR1 |= SPI_CR1_SPE;
         spi_regs->CR1 |= SPI_CR1_CSTART;
         
-        // Wait for transfer completion with timeout
-        uint32_t timeout = 1000; // 1ms timeout per byte
+        // Wait for transfer completion with tight polling and timeout
+        uint32_t timeout = 100000; // Large counter for tight polling
         while ((tx_stream->NDTR > 0 || rx_stream->NDTR > 0) && timeout > 0) {
-            delayMicroseconds(1);
+            __DMB(); // Data memory barrier for register read
             timeout--;
         }
         

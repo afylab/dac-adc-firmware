@@ -23,6 +23,7 @@ class God {
     registerMemberFunctionVector(timeSeriesBufferRampWrapper, "TIME_SERIES_BUFFER_RAMP");
     registerMemberFunctionVector(dacLedBufferRampWrapper, "DAC_LED_BUFFER_RAMP");
     registerMemberFunctionVector(AWGBufferRampWrapper, "AWG_BUFFER_RAMP");
+    registerMemberFunctionVector(AWGWithADCWrapper, "AWG_WITH_ADC");
     registerMemberFunctionVector(timeSeriesAdcRead, "TIME_SERIES_ADC_READ");
     registerMemberFunction(dacChannelCalibration, "DAC_CH_CAL");
     registerMemberFunctionVector(boxcarAverageRamp, "BOXCAR_BUFFER_RAMP");
@@ -810,6 +811,295 @@ class God {
     return OperationResult::Success();
   }
 
+  static OperationResult OwenRampWrapper(std::vector<float> args) {
+    // Expected argument order:
+    // [numDacChannels, numAdcChannels, numLoops, numDacStepsPerLoop, numAdcAverages, dac_interval_us, dac_settling_time_us, <dacChannels...>, <adcChannels...>, <dacVoltageLists...>]
+    // The number of DAC and ADC channels determines how many channel indices and voltage lists to expect.
+
+    if (args.size() < 7) {
+      return OperationResult::Failure("Insufficient arguments for OwenRampWrapper");
+    }
+
+    int idx = 0;
+    int numDacChannels = static_cast<int>(args[idx++]);
+    int numAdcChannels = static_cast<int>(args[idx++]);
+    int numLoops = static_cast<int>(args[idx++]);
+    int numDacStepsPerLoop = static_cast<int>(args[idx++]);
+    int numAdcAverages = static_cast<int>(args[idx++]);
+    uint32_t dac_interval_us = static_cast<uint32_t>(args[idx++]);
+
+    // Check for valid channel counts
+    if (numDacChannels < 1 || numAdcChannels < 1 || numLoops < 1 || numDacStepsPerLoop < 1 || numAdcAverages < 1) {
+      return OperationResult::Failure("Invalid channel or loop/step/average count");
+    }
+
+    // Check if enough arguments for channel indices
+    if (args.size() < idx + numDacChannels + numAdcChannels) {
+      return OperationResult::Failure("Insufficient arguments for channel indices");
+    }
+
+    // Parse DAC channel indices
+    int dacChannels[numDacChannels];
+    for (int i = 0; i < numDacChannels; ++i) {
+      dacChannels[i] = static_cast<int>(args[idx++]);
+    }
+
+    // Parse ADC channel indices
+    int adcChannels[numAdcChannels];
+    for (int i = 0; i < numAdcChannels; ++i) {
+      adcChannels[i] = static_cast<int>(args[idx++]);
+    }
+
+    // Parse DAC voltage lists
+    float** dacVoltageLists = new float*[numDacChannels];
+    for (int i = 0; i < numDacChannels; ++i) {
+      dacVoltageLists[i] = new float[numDacStepsPerLoop];
+      for (int j = 0; j < numDacStepsPerLoop; ++j) {
+        dacVoltageLists[i][j] = args[idx++];
+      }
+    }
+
+    // Parse special ramp parameters
+    int specialIndex = static_cast<int>(args[idx++]);
+    int specialWidth = static_cast<int>(args[idx++]);
+    int numStepsPerSpecialRamp = static_cast<int>(args[idx++]);
+    float* specialDacV0s = new float[numDacChannels];
+    for (int i = 0; i < numDacChannels; ++i) {
+      specialDacV0s[i] = args[idx++];
+    }
+    float* specialDacVfs = new float[numDacChannels];
+    for (int i = 0; i < numDacChannels; ++i) {
+      specialDacVfs[i] = args[idx++];
+    }
+
+    return OwenRampBase(numDacChannels, numAdcChannels, numLoops, numDacStepsPerLoop, numAdcAverages, dac_interval_us, dacChannels, dacVoltageLists, adcChannels, specialIndex, specialWidth, numStepsPerSpecialRamp, specialDacV0s, specialDacVfs);
+  }
+
+  static OperationResult OwenRampBase(
+    int numDacChannels, int numAdcChannels, int numLoops, int numDacStepsPerLoop, int numAdcAverages,
+    uint32_t dac_interval_us, int* dacChannels,
+    float** dacVoltageLists, int* adcChannels, int specialIndex, int specialWidth, int numStepsPerSpecialRamp, float* specialDacV0s, float* specialDacVfs) {
+
+      if (dac_interval_us < 1) {
+        return OperationResult::Failure("Invalid interval or settling time");
+      }
+      if (numAdcAverages < 1) {
+        return OperationResult::Failure("Invalid number of ADC averages");
+      }
+      if (numLoops < 1 || numDacStepsPerLoop < 1) {
+        return OperationResult::Failure("Invalid number of loops or steps per loop");
+      }
+      if (numDacChannels < 1 || numAdcChannels < 1) {
+        return OperationResult::Failure("Invalid number of channels");
+      }
+      
+      double packets[numAdcChannels];
+      double numAdcAveragesInv = 1.0 / static_cast<double>(numAdcAverages);
+  
+      setStopFlag(false);
+      PeripheralCommsController::dataLedOn();
+  
+      ADCController::resetToPreviousConversionTimes();
+  
+      #ifdef __NEW_DAC_ADC__
+      digitalWrite(adc_sync, LOW);
+  
+      static void (*isrFunctions[])() = {
+        TimingUtil::adcSyncISR<0>,
+        TimingUtil::adcSyncISR<1>,
+        TimingUtil::adcSyncISR<2>,
+        TimingUtil::adcSyncISR<3>
+      };
+  
+      std::vector<uint8_t> boards;
+  
+      for (int i = 0; i < numAdcChannels; ++i) {
+          int ch = adcChannels[i];
+          if (ch < 0) continue;          // skip invalid values
+          uint8_t board = ch / 4;        // 0‑based board index
+          if (std::find(boards.begin(), boards.end(), board) == boards.end())
+              boards.push_back(board);   // keep only unique board numbers
+      }
+  
+      std::sort(boards.begin(), boards.end());
+  
+      int numAdcBoards = boards.size();
+  
+      //check to see if buffer ramp is compatible with the current ADC configuration
+      float convTimeSum[4] = {0.0, 0.0, 0.0, 0.0};
+      uint8_t board_num = 0;
+      int chNum = 0;
+      for (int i = 0; i < numAdcChannels; i++) {
+        chNum = adcChannels[i];
+        board_num = chNum / 4; // 0-based board index
+        convTimeSum[board_num] += ADCController::getConversionTimeFloat(adcChannels[i]);
+      }
+      float maxConvTime = *std::max_element(std::begin(convTimeSum), std::end(convTimeSum));
+      uint32_t totalDacSweepTime = numDacStepsPerLoop * dac_interval_us;
+      if(maxConvTime*numAdcAverages + 180 >= totalDacSweepTime) {
+        return OperationResult::Failure("DAC sweep time is too short for specified ADC conversion time, please increase dac_interval_us or reduce numDacStepsPerLoop");
+      }
+  
+      for (int i = 0; i < numAdcBoards; i++) {
+        attachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boards[i])), isrFunctions[i], FALLING);
+      }
+      #endif
+  
+      uint8_t adcMask = 0u;
+      #ifdef __NEW_DAC_ADC__
+      for (int i = 0; i < numAdcBoards; i++) {
+        adcMask |= 1 << i;
+      }
+      #else
+      adcMask = 1;
+      #endif
+  
+      // Initialize timing flags
+      TimingUtil::dacFlag = false;
+      TimingUtil::adcFlag = 0;
+  
+      // Track current position in voltage lists and loop
+      int currentLoop = 0;
+      int totalDacSteps = numLoops * numDacStepsPerLoop;
+      int currentDacStep = 0;
+      int currentAdcReads = 0;
+
+      float currentSpecialDacVoltages[numDacChannels];
+      float specialDacVoltageStep[numDacChannels];
+
+      for (int i = 0; i < numDacChannels; i++) {
+        currentSpecialDacVoltages[i] = specialDacV0s[i];
+      }
+
+      for (int i = 0; i < numDacChannels; i++) {
+        specialDacVoltageStep[i] = (specialDacVfs[i] - specialDacV0s[i]) / numLoops;
+      }
+
+  
+      // Set initial DAC voltages (first step of first loop)
+      for (int i = 0; i < numDacChannels; i++) {
+        DACController::setVoltageNoTransactionNoLdac(dacChannels[i], dacVoltageLists[i][0]);
+      }
+      currentDacStep++;
+  
+      // Start ADC continuous conversion
+      for (int i = 0; i < numAdcChannels; i++) {
+        ADCController::startContinuousConversion(adcChannels[i]);
+        #ifdef __NEW_DAC_ADC__
+        ADCController::setRDYFN(adcChannels[i]);
+        #endif
+      }
+  
+      // Setup timers for DAC and ADC events
+      TimingUtil::setupTimerOnlyDac(dac_interval_us);
+      TimingUtil::dacFlag = false;
+  
+      bool done = false;
+
+      int subIndex = 0;
+  
+      // Main event loop using interrupt-based timing
+      while (currentLoop < numLoops && !getStopFlag()) {
+        __WFE(); // Wait for event (interrupt)
+        
+        // Handle DAC flag - time to set next DAC voltage
+        if (TimingUtil::dacFlag && currentDacStep < totalDacSteps) {
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::beginDacTransaction();
+          #endif
+
+          if (currentDacStep == specialIndex) {
+            for (int i = 0; i < numDacChannels; i++) {
+              DACController::setVoltageNoTransactionNoLdac(dacChannels[i], currentSpecialDacVoltages[i]);
+            }
+            subIndex++;
+            if (subIndex >= numStepsPerSpecialRamp) {
+              subIndex = 0;
+              currentDacStep++;
+              for (int i = 0; i < numDacChannels; i++) {
+                currentSpecialDacVoltages[i] += specialDacVoltageStep[i];
+              }
+            }
+          } else {
+            for (int i = 0; i < numDacChannels; i++) {
+              float voltage = dacVoltageLists[i][currentDacStep];
+              DACController::setVoltageNoTransactionNoLdac(dacChannels[i], voltage);
+            }
+            currentDacStep++;
+          }
+
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::endTransaction();
+          #endif
+          
+  
+          // Check if we've completed a full sweep of voltages for this loop
+          if (currentDacStep >= numDacStepsPerLoop) {
+            currentDacStep = 0; // Reset to beginning of voltage list for next loop
+            done = true; // Mark that we need to read ADC after settling
+          }
+          
+          TimingUtil::dacFlag = false;
+        }
+        
+        // Handle ADC flag - time to read ADC after settling
+        if (done) {
+          done = false; // Reset done flag for next ADC read
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::beginAdcTransaction();
+          #endif
+          for (int i = 0; i < numAdcChannels; i++) {
+            double total = 0.0;
+            for (int j = 0; j < numAdcAverages; j++) {
+              total += ADCController::getVoltage(adcChannels[i]);
+            }
+            packets[i] = total * numAdcAveragesInv;
+          }
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::endTransaction();
+          #endif
+          m4SendVoltage(packets, numAdcChannels);
+          
+          #ifdef __NEW_DAC_ADC__
+          digitalWrite(adc_sync, LOW);
+          #endif
+          TimingUtil::adcFlag = 0;
+          currentAdcReads++;
+          currentLoop++; // Each ADC read marks completion of one loop
+        }
+      }
+  
+      // Clean up timers
+      TimingUtil::disableDacInterrupt();
+      TimingUtil::disableAdcInterrupt();
+      TimingUtil::dacFlag = false;
+      TimingUtil::adcFlag = 0;
+  
+      // Clean up
+      for (int i = 0; i < numAdcChannels; i++) {
+        ADCController::idleMode(adcChannels[i]);
+        #ifdef __NEW_DAC_ADC__
+        ADCController::unsetRDYFN(adcChannels[i]);
+        #endif
+      }
+  
+      #ifdef __NEW_DAC_ADC__
+      for (int i = 0; i < numAdcBoards; i++) {
+        detachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boards[i])));
+      }
+      #endif
+  
+      ADCController::resetToPreviousConversionTimes();
+      PeripheralCommsController::dataLedOff();
+  
+      if (getStopFlag()) {
+        setStopFlag(false);
+        return OperationResult::Failure("RAMPING_STOPPED");
+      }
+  
+      return OperationResult::Success();
+    }
+
 
   static OperationResult AWGBufferRampWrapper(std::vector<float> args) {
     //   AWG_BUFFER_RAMP,<dacN>,<numSteps>,<dacInterval_us>,<dacPorts...>,<voltages...>
@@ -909,6 +1199,137 @@ class God {
         if (step >= numSteps) {
           step = 0;
         }
+      }
+    }
+
+    TimingUtil::disableDacInterrupt();
+    TimingUtil::dacFlag = false;
+    PeripheralCommsController::dataLedOff();
+
+    if (getStopFlag()) {
+      setStopFlag(false);
+      return OperationResult::Failure("RAMPING_STOPPED");
+    }
+    return OperationResult::Success();
+  }
+
+  // AWG_WITH_ADC: AWG waveform with ADC reading at each step
+  // Format: AWG_WITH_ADC,dacN,adcN,numSteps,dac_interval_us,numCycles,dacChannels...,adcChannels...,voltages...
+  // Voltages are channel-major: all points for DAC0, then all for DAC1, etc.
+  static OperationResult AWGWithADCWrapper(std::vector<float> args) {
+    if (args.size() < 5) {
+      return OperationResult::Failure("Insufficient arguments for AWG_WITH_ADC");
+    }
+
+    const int dacN = static_cast<int>(args[0]);
+    const int adcN = static_cast<int>(args[1]);
+    const int numSteps = static_cast<int>(args[2]);
+    const uint32_t dac_interval_us = static_cast<uint32_t>(args[3]);
+    const int numCycles = static_cast<int>(args[4]);
+
+    if (dacN < 1 || adcN < 1 || numSteps < 1 || numCycles < 1) {
+      return OperationResult::Failure("Invalid channel counts or step/cycle count");
+    }
+
+    const size_t expected = 5u + dacN + adcN + (static_cast<size_t>(dacN) * numSteps);
+    if (args.size() != expected) {
+      return OperationResult::Failure("Invalid argument count for AWG_WITH_ADC");
+    }
+
+    int idx = 5;
+    int dacChannels[dacN];
+    for (int i = 0; i < dacN; ++i) {
+      dacChannels[i] = static_cast<int>(args[idx++]);
+    }
+
+    int adcChannels[adcN];
+    for (int i = 0; i < adcN; ++i) {
+      adcChannels[i] = static_cast<int>(args[idx++]);
+    }
+
+    const float* voltages = &args[idx];
+    return AWGWithADCBase(dacN, adcN, numSteps, dac_interval_us, numCycles, dacChannels, adcChannels, voltages);
+  }
+
+  static OperationResult AWGWithADCBase(
+      int numDacChannels, int numAdcChannels, int numSteps,
+      uint32_t dac_interval_us, int numCycles,
+      int* dacChannels, int* adcChannels, const float* channelMajorVoltages) {
+
+    if (dac_interval_us < 1) {
+      return OperationResult::Failure("Invalid dac interval");
+    }
+    if (numDacChannels < 1 || numAdcChannels < 1 || numSteps < 1) {
+      return OperationResult::Failure("Invalid number of channels or steps");
+    }
+
+    // Bounds check DAC voltages
+    for (int i = 0; i < numDacChannels; i++) {
+      int ch = dacChannels[i];
+      float lowerBound = DACController::getLowerBound(ch);
+      float upperBound = DACController::getUpperBound(ch);
+      const float* vlist = &channelMajorVoltages[static_cast<size_t>(i) * static_cast<size_t>(numSteps)];
+      for (int j = 0; j < numSteps; j++) {
+        float v = vlist[j];
+        if (v < lowerBound || v > upperBound) {
+          return OperationResult::Failure("DAC " + String(ch) +
+                                          " voltage[" + String(j) + "] = " + String(v, 6) +
+                                          "V out of bounds [" + String(lowerBound, 6) +
+                                          ", " + String(upperBound, 6) + "]");
+        }
+      }
+    }
+
+    setStopFlag(false);
+    PeripheralCommsController::dataLedOn();
+    ADCController::resetToPreviousConversionTimes();
+
+    double packets[numAdcChannels];
+
+    // Apply initial step
+    for (int i = 0; i < numDacChannels; i++) {
+      const float v0 = channelMajorVoltages[static_cast<size_t>(i) * static_cast<size_t>(numSteps)];
+      DACController::setVoltageNoTransactionNoLdac(dacChannels[i], v0);
+    }
+
+    TimingUtil::setupTimerOnlyDac(dac_interval_us);
+    TimingUtil::dacFlag = false;
+
+    // Main loop: for each cycle, for each step, set DAC and read ADC
+    for (int cycle = 0; cycle < numCycles && !getStopFlag(); cycle++) {
+      for (int step = 0; step < numSteps && !getStopFlag(); step++) {
+        // Wait for timer flag
+        while (!TimingUtil::dacFlag && !getStopFlag()) {
+          __WFE();
+        }
+        TimingUtil::dacFlag = false;
+
+        // Set DAC voltages for this step
+        #if !defined(__NEW_SHIELD__)
+        PeripheralCommsController::beginDacTransaction();
+        #endif
+        for (int i = 0; i < numDacChannels; i++) {
+          const float v = channelMajorVoltages[static_cast<size_t>(i) * static_cast<size_t>(numSteps) +
+                                               static_cast<size_t>(step)];
+          DACController::setVoltageNoTransactionNoLdac(dacChannels[i], v);
+        }
+        #if !defined(__NEW_SHIELD__)
+        PeripheralCommsController::endTransaction();
+        #endif
+
+        // Read ADC channels
+        #if !defined(__NEW_SHIELD__)
+        PeripheralCommsController::beginAdcTransaction();
+        #endif
+        for (int i = 0; i < numAdcChannels; i++) {
+          packets[i] = ADCController::getVoltage(adcChannels[i]);
+        }
+        #if !defined(__NEW_SHIELD__)
+        PeripheralCommsController::endTransaction();
+        #endif
+
+        // Send ADC data back
+        m4SendVoltage(packets, numAdcChannels);
       }
     }
 
