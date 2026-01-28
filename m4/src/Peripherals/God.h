@@ -1280,11 +1280,57 @@ class God {
       }
     }
 
+    #ifdef __NEW_DAC_ADC__
+      digitalWrite(adc_sync, LOW);
+
+      static void (*isrFunctions[])() = {
+        TimingUtil::adcSyncISR<0>,
+        TimingUtil::adcSyncISR<1>,
+        TimingUtil::adcSyncISR<2>,
+        TimingUtil::adcSyncISR<3>
+      };
+
+      std::vector<uint8_t> boards;
+
+      for (int i = 0; i < numAdcChannels; ++i) {
+          int ch = adcChannels[i];
+          if (ch < 0) continue;
+          uint8_t board = ch / 4;
+          if (std::find(boards.begin(), boards.end(), board) == boards.end())
+              boards.push_back(board);
+      }
+
+      std::sort(boards.begin(), boards.end());
+
+      int numAdcBoards = boards.size();
+
+      for (int i = 0; i < numAdcBoards; i++) {
+        attachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boards[i])), isrFunctions[i], FALLING);
+      }
+      #endif
+
+      uint8_t adcMask = 0u;
+      #ifdef __NEW_DAC_ADC__
+      for (int i = 0; i < numAdcBoards; i++) {
+        adcMask |= 1 << i;
+      }
+      #else
+      adcMask = 1;
+      #endif
+
     setStopFlag(false);
     PeripheralCommsController::dataLedOn();
     ADCController::resetToPreviousConversionTimes();
 
     double packets[numAdcChannels];
+
+    // Start ADC continuous conversion
+    for (int i = 0; i < numAdcChannels; i++) {
+      ADCController::startContinuousConversion(adcChannels[i]);
+      #ifdef __NEW_DAC_ADC__
+      ADCController::setRDYFN(adcChannels[i]);
+      #endif
+    }
 
     // Apply initial step
     for (int i = 0; i < numDacChannels; i++) {
@@ -1292,50 +1338,89 @@ class God {
       DACController::setVoltageNoTransactionNoLdac(dacChannels[i], v0);
     }
 
+    #ifdef __NEW_DAC_ADC__
+    // New hardware: DAC timer only, ADC triggered by data_ready interrupt
     TimingUtil::setupTimerOnlyDac(dac_interval_us);
+    #else
+    // Old hardware: Need both DAC and ADC timers since no data_ready interrupt
+    // Use ADC conversion time as ADC interval
+    uint32_t adc_interval_us = static_cast<uint32_t>(ADCController::getConversionTimeFloat(adcChannels[0])) + 50;
+    TimingUtil::setupTimersTimeSeries(dac_interval_us, adc_interval_us);
+    #endif
     TimingUtil::dacFlag = false;
+    TimingUtil::adcFlag = 0;
 
     // Main loop: for each cycle, for each step, set DAC and read ADC
     for (int cycle = 0; cycle < numCycles && !getStopFlag(); cycle++) {
-      for (int step = 0; step < numSteps && !getStopFlag(); step++) {
+      int step = 0;
+      while (step < numSteps && !getStopFlag()) {
         // Wait for timer flag
-        while (!TimingUtil::dacFlag && !getStopFlag()) {
-          __WFE();
-        }
-        TimingUtil::dacFlag = false;
+        __WFE();
+        if (TimingUtil::dacFlag) {
+          TimingUtil::dacFlag = false;
 
-        // Set DAC voltages for this step
-        #if !defined(__NEW_SHIELD__)
-        PeripheralCommsController::beginDacTransaction();
-        #endif
-        for (int i = 0; i < numDacChannels; i++) {
-          const float v = channelMajorVoltages[static_cast<size_t>(i) * static_cast<size_t>(numSteps) +
-                                               static_cast<size_t>(step)];
-          DACController::setVoltageNoTransactionNoLdac(dacChannels[i], v);
+          // Set DAC voltages for this step
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::beginDacTransaction();
+          #endif
+          for (int i = 0; i < numDacChannels; i++) {
+            const float v = channelMajorVoltages[static_cast<size_t>(i) * static_cast<size_t>(numSteps) +
+                                                static_cast<size_t>(step)];
+            DACController::setVoltageNoTransactionNoLdac(dacChannels[i], v);
+          }
+          #ifdef __NEW_DAC_ADC__
+          digitalWrite(adc_sync, HIGH);
+          #endif
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::endTransaction();
+          #endif
+          step++;
         }
-        #if !defined(__NEW_SHIELD__)
-        PeripheralCommsController::endTransaction();
-        #endif
 
-        // Read ADC channels
-        #if !defined(__NEW_SHIELD__)
-        PeripheralCommsController::beginAdcTransaction();
-        #endif
-        for (int i = 0; i < numAdcChannels; i++) {
-          packets[i] = ADCController::getVoltage(adcChannels[i]);
+        if (TimingUtil::adcFlag) {
+          // Read ADC channels (data already converted, just read it)
+          #ifdef __NEW_DAC_ADC__
+          digitalWrite(adc_sync, LOW);
+          #endif
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::beginAdcTransaction();
+          #endif
+          for (int i = 0; i < numAdcChannels; i++) {
+            packets[i] = ADCController::getVoltageData(adcChannels[i]);
+          }
+          #if !defined(__NEW_SHIELD__)
+          PeripheralCommsController::endTransaction();
+          #endif
+
+          // Send ADC data back
+          m4SendVoltage(packets, numAdcChannels);
+          TimingUtil::adcFlag = 0;
         }
-        #if !defined(__NEW_SHIELD__)
-        PeripheralCommsController::endTransaction();
-        #endif
-
-        // Send ADC data back
-        m4SendVoltage(packets, numAdcChannels);
       }
     }
 
     TimingUtil::disableDacInterrupt();
+    #ifndef __NEW_DAC_ADC__
+    TimingUtil::disableAdcInterrupt();  // Old hardware uses TIM8 for ADC
+    #endif
     TimingUtil::dacFlag = false;
     PeripheralCommsController::dataLedOff();
+
+    // Stop continuous conversion
+    for (int i = 0; i < numAdcChannels; i++) {
+      ADCController::idleMode(adcChannels[i]);
+      #ifdef __NEW_DAC_ADC__
+      ADCController::unsetRDYFN(adcChannels[i]);
+      #endif
+    }
+
+    #ifdef __NEW_DAC_ADC__
+    for (int i = 0; i < numAdcBoards; i++) {
+      detachInterrupt(digitalPinToInterrupt(ADCController::getDataReadyPin(boards[i])));
+    }
+    #endif
+
+    ADCController::resetToPreviousConversionTimes();
 
     if (getStopFlag()) {
       setStopFlag(false);
