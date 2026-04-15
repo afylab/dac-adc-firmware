@@ -9,7 +9,7 @@ import serial.tools.list_ports
 
 SERIAL_BAUD = 115200
 SERIAL_TIMEOUT_S = 2
-READY_RETRY_COUNT = 30
+READY_RETRY_COUNT = 60
 READY_RETRY_DELAY_S = 0.5
 CALIBRATION_WRITE_DELAY_S = 0.05
 FLOAT_VERIFY_ABS_TOL = 1e-6
@@ -17,6 +17,7 @@ ADC_CHANNEL_COUNT = 8
 SERIAL_PATTERN = re.compile(r"DA_2025_.{3}$")
 SERIAL_MARKER = b"__SERIAL_NUMBER__"
 SERIAL_FIELD_LENGTH = 12
+ABC_SERIAL_NUMBER = "DA_2025_ABC"
 
 M4_ENVIRONMENT_MAP = {
     "giga_r1_m4_old_hardware": "OLD_HARDWARE",
@@ -37,19 +38,58 @@ def get_binary_path(env):
     return Path(env.subst("$BUILD_DIR")) / f"{env.subst('${PROGNAME}')}.bin"
 
 
+KNOWN_GIGA_VIDS_PIDS = {
+    (0x2341, 0x0266),
+}
+
+
 def is_m4_project(env):
     return env.subst("$PIOENV") in M4_ENVIRONMENT_MAP
 
 
-def find_giga_port():
-    for port in serial.tools.list_ports.comports():
-        if (
-            port.description is not None
-            and port.manufacturer is not None
-            and "Giga" in port.description
-            and "Arduino" in port.manufacturer
-        ):
+def parse_vid_pid_from_hwid(hwid):
+    if not hwid:
+        return None, None
+    match = re.search(r"VID(?:[:_=]|_)?([0-9A-Fa-f]{4}).*?PID(?:[:_=]|_)?([0-9A-Fa-f]{4})", hwid)
+    if not match:
+        return None, None
+    return int(match.group(1), 16), int(match.group(2), 16)
+
+
+def is_giga_port(port):
+    vid, pid = port.vid, port.pid
+    if vid is None or pid is None:
+        vid, pid = parse_vid_pid_from_hwid(port.hwid)
+    return (vid, pid) in KNOWN_GIGA_VIDS_PIDS
+
+
+def find_giga_port(env=None):
+    ports = list(serial.tools.list_ports.comports())
+    if env is not None:
+        upload_port = env.subst("$UPLOAD_PORT")
+        if upload_port and upload_port != "$UPLOAD_PORT":
+            existing = next((p for p in ports if p.device == upload_port), None)
+            if existing:
+                if is_giga_port(existing):
+                    log(f"Using configured upload port: {upload_port}")
+                    return upload_port
+                log(
+                    f"Configured upload port {upload_port} is present but not a recognized GIGA device; scanning actual ports"
+                )
+            else:
+                log(
+                    f"Configured upload port {upload_port} not present; scanning actual ports"
+                )
+
+    for port in ports:
+        if is_giga_port(port):
+            log(f"Found GIGA port {port.device} ({port.hwid})")
             return port.device
+
+    log(
+        "No GIGA serial port found. "
+        f"Available ports: {[p.device for p in ports]}"
+    )
     return None
 
 
@@ -94,18 +134,31 @@ def wait_for_ready(ser):
     raise RuntimeError("Device never reported READY.")
 
 
-def wait_for_device_ready():
+def wait_for_device_ready(env=None, port=None):
     last_error = None
+    if port is not None:
+        log(f"Waiting for same port to become ready: {port}")
+        for _ in range(READY_RETRY_COUNT):
+            try:
+                with open_command_port(port) as ser:
+                    wait_for_ready(ser)
+                return port
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                time.sleep(READY_RETRY_DELAY_S)
+
+        raise RuntimeError(f"Device never became ready after upload: {last_error}")
+
     for _ in range(READY_RETRY_COUNT):
-        port = find_giga_port()
-        if port is None:
+        current_port = find_giga_port(env)
+        if current_port is None:
             time.sleep(READY_RETRY_DELAY_S)
             continue
 
         try:
-            with open_command_port(port) as ser:
+            with open_command_port(current_port) as ser:
                 wait_for_ready(ser)
-            return port
+            return current_port
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             time.sleep(READY_RETRY_DELAY_S)
@@ -261,9 +314,21 @@ def verify_calibration(port, state):
 
 def backup_device_state(port):
     with open_command_port(port) as ser:
+        if firmware_hangs_on_noop(ser):
+            return {
+                "skip": True,
+                "skip_reason": "firmware_hangs_on_nop",
+            }
+
         wait_for_ready(ser)
         source_environment = send_command(ser, "GET_ENVIRONMENT")
         serial_number = send_command(ser, "SERIAL_NUMBER")
+        if is_placeholder_serial(serial_number):
+            return {
+                "skip": True,
+                "skip_reason": "placeholder_serial",
+            }
+
         if not SERIAL_PATTERN.fullmatch(serial_number or ""):
             raise RuntimeError(
                 "Could not determine a valid serial number from the current firmware."
@@ -314,6 +379,17 @@ def load_state(env):
     return json.loads(state_path.read_text())
 
 
+def is_placeholder_serial(serial_number):
+    return serial_number == ABC_SERIAL_NUMBER
+
+
+def firmware_hangs_on_noop(ser):
+    try:
+        return send_command(ser, "NOP", timeout=1) != "NOP"
+    except RuntimeError:
+        return True
+
+
 def delete_state(env):
     state_path = get_state_path(env)
     if state_path.exists():
@@ -322,11 +398,20 @@ def delete_state(env):
 
 def run_pre_upload(env):
     pioenv = env.subst("$PIOENV")
-    port = find_giga_port()
+    port = find_giga_port(env)
     if port is None:
         raise RuntimeError("Arduino GIGA not found before upload.")
 
     state = backup_device_state(port)
+    state["source_port"] = port
+    if state.get("skip"):
+        log(
+            "Skipping calibration/serial persistence: "
+            f"{state.get('skip_reason')}"
+        )
+        save_state(env, state)
+        return
+    
     log(
         "Backed up device state "
         f"(env={state['source_environment']}, serial={state['serial_number']})."
@@ -348,7 +433,15 @@ def run_pre_upload(env):
 
 def run_post_upload(env):
     state = load_state(env)
-    port = wait_for_device_ready()
+    if state.get("skip"):
+        log(
+            "Skipping post-upload calibration/serial verification: "
+            f"{state.get('skip_reason')}"
+        )
+        delete_state(env)
+        return
+
+    port = wait_for_device_ready(env, port=state.get("source_port"))
     log(f"Restoring calibration on {port}...")
     restore_calibration(port, state)
     verify_calibration(port, state)
