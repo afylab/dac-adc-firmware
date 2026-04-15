@@ -9,6 +9,7 @@
 class DACChannel {
  private:
   float gain_error;
+  float gain_error_inverse;
   float offset_error;
   int cs_pin;
   int channel_index;
@@ -24,6 +25,7 @@ class DACChannel {
     this->channel_index = channel_index;
     offset_error = 0.0;
     gain_error = 1.0;
+    gain_error_inverse = 1.0;
     voltage_upper_bound = full_scale * gain_error + offset_error;
     voltage_lower_bound = -full_scale * gain_error + offset_error;
   }
@@ -60,7 +62,7 @@ class DACChannel {
       return NAN;
     }
 
-    voltageToDecimal(v / gain_error - offset_error, &b1, &b2, &b3);
+    voltageToDecimal(v * gain_error_inverse - offset_error, &b1, &b2, &b3);
 
     byte bytesToSend[3] = {b1, b2, b3};
 
@@ -83,7 +85,7 @@ class DACChannel {
       return;
     }
 
-    voltageToDecimal(v / gain_error - offset_error, &b1, &b2, &b3);
+    voltageToDecimal(v * gain_error_inverse - offset_error, &b1, &b2, &b3);
 
     byte bytesToSend[3] = {b1, b2, b3};
 
@@ -95,6 +97,7 @@ class DACChannel {
   void setCalibration(float offset, float gain) {
     this->offset_error = offset;
     this->gain_error = gain;
+    this->gain_error_inverse = 1.0 / gain;
     voltage_upper_bound = full_scale * gain_error + offset_error;
     voltage_lower_bound = -full_scale * gain_error + offset_error;
   }
