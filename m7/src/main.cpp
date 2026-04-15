@@ -216,7 +216,7 @@ void loop()
   }
   if (m7HasCharMessage())
   {
-    char response[CHAR_BUFFER_SIZE];
+    char response[4096];
     size_t size = sizeof(response);
     if (m7ReceiveChar(response, size))
     {

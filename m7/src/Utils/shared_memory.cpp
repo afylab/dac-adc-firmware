@@ -1,20 +1,16 @@
 #include "shared_memory.h"
 #include <SDRAM.h>
+#include <vector>
 
-// Adjust the SDRAM base if needed for GIGA R1
 #define SDRAM_START_ADDRESS 0x38000000
 
-// Global pointer to the shared memory struct in SDRAM
 SharedMemory* shared_memory = nullptr;
 
 bool initSharedMemory() {
-  // Initialize the SDRAM
   SDRAM.begin(SDRAM_START_ADDRESS);
 
-  // Map our SharedMemory struct onto the start of SDRAM
   shared_memory = reinterpret_cast<SharedMemory*>(SDRAM_START_ADDRESS);
 
-  // Zero out ring buffer indices
   shared_memory->m4_to_m7_char_buffer.read_index = 0;
   shared_memory->m4_to_m7_char_buffer.write_index = 0;
   shared_memory->m7_to_m4_char_buffer.read_index = 0;
@@ -24,7 +20,6 @@ bool initSharedMemory() {
   shared_memory->m4_to_m7_voltage_buffer.read_index = 0;
   shared_memory->m4_to_m7_voltage_buffer.write_index = 0;
 
-  // Reset stop_flag
   shared_memory->stop_flag = false;
 
   shared_memory->isCalibrationUpdated = false;
@@ -32,15 +27,6 @@ bool initSharedMemory() {
   shared_memory->isCalibrationReady = false;
 
   return true;
-}
-
-void m4SendCalibrationData(const CalibrationData& data) {
-  memcpy(&shared_memory->calibrationData, &data, sizeof(CalibrationData));
-  shared_memory->isCalibrationUpdated = true;
-}
-
-void m4ReceiveCalibrationData(CalibrationData& data) {
-  memcpy(&data, &shared_memory->calibrationData, sizeof(CalibrationData));
 }
 
 void m7SendCalibrationData(const CalibrationData& data) {
@@ -65,7 +51,6 @@ bool isCalibrationReady() {
   return shared_memory->isCalibrationReady;
 }
 
-// Set/get stop flag
 void setStopFlag(bool value) { shared_memory->stop_flag = value; }
 bool getStopFlag() { return shared_memory->stop_flag; }
 
@@ -97,66 +82,53 @@ static uint32_t readUint32FromCharBuffer(CharCircularBuffer* buffer,
 // ---------------------------------------------------------------------------
 static bool charBufferSend(CharCircularBuffer* buffer, const char* data,
                            size_t length) {
-  // NOTE: With a 256-byte ring, and a 4-byte length header, and the classic
-  // "leave one slot empty" rule, the true maximum payload per message is 251.
+  // NOTE: With a 256-byte ring, and a 4-byte length header, and leaving one slot empty, the true maximum payload per message is 251.
   constexpr size_t kMaxCharPayload = (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
   if (length > kMaxCharPayload) return false;
 
-  // Compute available space in the ring buffer
   // We need to store 4 bytes for 'length' + the actual payload
   uint32_t available_space =
       (buffer->read_index - buffer->write_index - 1 + CHAR_BUFFER_SIZE) %
       CHAR_BUFFER_SIZE;
 
-  // If not enough space, fail
   if (length + 4 > available_space) {
     return false;
   }
 
-  // Write the 4-byte message length, byte by byte
   uint32_t write_index = buffer->write_index;
   writeUint32ToCharBuffer(buffer, write_index, static_cast<uint32_t>(length));
 
-  // Write the actual message bytes
   for (size_t i = 0; i < length; i++) {
     buffer->buffer[write_index] = data[i];
     write_index = (write_index + 1) % CHAR_BUFFER_SIZE;
   }
 
-  // Update the official write_index
   buffer->write_index = write_index;
   return true;
 }
 
 static bool charBufferReceive(CharCircularBuffer* buffer, char* data,
                               size_t& length) {
-  // If buffer empty, no messages
   if (buffer->read_index == buffer->write_index) {
     length = 0;
     return false;
   }
 
-  // Read the 4-byte length
   uint32_t read_index = buffer->read_index;
   uint32_t msg_length = readUint32FromCharBuffer(buffer, read_index);
 
-  // Check if caller's buffer is large enough
   if (msg_length > length) {
-    // Let the caller know the required size
     length = msg_length;
     return false;
   }
 
-  // Copy the message into 'data'
   for (size_t i = 0; i < msg_length; i++) {
     data[i] = buffer->buffer[read_index];
     read_index = (read_index + 1) % CHAR_BUFFER_SIZE;
   }
 
-  // Update read_index
   buffer->read_index = read_index;
 
-  // Tell caller how many bytes we read
   length = msg_length;
   return true;
 }
@@ -165,46 +137,8 @@ static bool charBufferHasMessage(CharCircularBuffer* buffer) {
   return (buffer->read_index != buffer->write_index);
 }
 
-// ---------------------------------------------------------------------------
-//  Float buffer operations (unchanged from original)
-//  - The first float is used to store the message length
-//  - This may also run into alignment issues if you read/write from the "wrong"
-//    boundary, but we preserve your original approach below.
-// ---------------------------------------------------------------------------
-static bool floatBufferSend(FloatCircularBuffer* buffer, const float* data,
-                            size_t length) {
-  // We store one extra float for 'length' and keep one slot empty to
-  // distinguish full vs empty.
-  constexpr size_t kMaxFloatPayload = (FLOAT_BUFFER_SIZE > 2) ? (FLOAT_BUFFER_SIZE - 2) : 0;
-  if (length > kMaxFloatPayload) return false;
-
-  // How many float-slots are free?
-  uint32_t available_space =
-      (buffer->read_index - buffer->write_index - 1 + FLOAT_BUFFER_SIZE) %
-      FLOAT_BUFFER_SIZE;
-
-  // We store an extra float for 'length', then the payload floats
-  if (length + 1 > available_space) return false;
-
-  uint32_t write_index = buffer->write_index;
-
-  // Store "length" as the first float
-  buffer->buffer[write_index] = static_cast<float>(length);
-  write_index = (write_index + 1) % FLOAT_BUFFER_SIZE;
-
-  // Store the payload
-  for (size_t i = 0; i < length; ++i) {
-    buffer->buffer[write_index] = data[i];
-    write_index = (write_index + 1) % FLOAT_BUFFER_SIZE;
-  }
-
-  buffer->write_index = write_index;
-  return true;
-}
-
 static bool floatBufferReceive(FloatCircularBuffer* buffer, float* data,
                                size_t& length) {
-  // Check if empty
   if (buffer->read_index == buffer->write_index) {
     length = 0;
     return false;
@@ -212,7 +146,6 @@ static bool floatBufferReceive(FloatCircularBuffer* buffer, float* data,
 
   uint32_t read_index = buffer->read_index;
 
-  // The first float is "message length"
   float msg_length_f = buffer->buffer[read_index];
   uint32_t msg_length = static_cast<uint32_t>(msg_length_f);
   read_index = (read_index + 1) % FLOAT_BUFFER_SIZE;
@@ -222,7 +155,6 @@ static bool floatBufferReceive(FloatCircularBuffer* buffer, float* data,
     return false;
   }
 
-  // Copy the floats into data
   for (size_t i = 0; i < msg_length; i++) {
     data[i] = buffer->buffer[read_index];
     read_index = (read_index + 1) % FLOAT_BUFFER_SIZE;
@@ -240,26 +172,6 @@ static bool floatBufferHasMessage(FloatCircularBuffer* buffer) {
 // ---------------------------------------------------------------------------
 //  Voltage buffer operations
 // ---------------------------------------------------------------------------
-static bool voltageBufferSend(VoltageCircularBuffer* buffer,
-                              const double* data, size_t length) {
-  if (length > MAX_MESSAGE_SIZE) return false;
-
-  // How many double-slots are free?
-  uint32_t available_space =
-      (buffer->read_index - buffer->write_index - 1 + VOLTAGE_BUFFER_SIZE) %
-      VOLTAGE_BUFFER_SIZE;
-
-  // We do not store a "length" here; just push doubles
-  if (length > available_space) return false;
-
-  for (size_t i = 0; i < length; ++i) {
-    buffer->buffer[buffer->write_index] = data[i];
-    buffer->write_index = (buffer->write_index + 1) % VOLTAGE_BUFFER_SIZE;
-  }
-
-  return true;
-}
-
 static bool voltageBufferReceive(VoltageCircularBuffer* buffer,
                                  double* data, size_t& length) {
   if (buffer->read_index == buffer->write_index) {
@@ -267,7 +179,6 @@ static bool voltageBufferReceive(VoltageCircularBuffer* buffer,
     return false;
   }
 
-  // How many floats are available?
   size_t available =
       (buffer->write_index - buffer->read_index + VOLTAGE_BUFFER_SIZE) %
       VOLTAGE_BUFFER_SIZE;
@@ -285,47 +196,7 @@ static bool voltageBufferReceive(VoltageCircularBuffer* buffer,
 }
 
 static bool voltageBufferHasMessage(VoltageCircularBuffer* buffer) {
-  // In this design, "HasMessage" just means not empty
   return buffer->read_index != buffer->write_index;
-}
-
-// ---------------------------------------------------------------------------
-//  M4 char functions
-// ---------------------------------------------------------------------------
-bool m4SendChar(const char* data, size_t length) {
-  return charBufferSend(&shared_memory->m4_to_m7_char_buffer, data, length);
-}
-bool m4ReceiveChar(char* data, size_t& length) {
-  return charBufferReceive(&shared_memory->m7_to_m4_char_buffer, data, length);
-}
-bool m4HasCharMessage() {
-  return charBufferHasMessage(&shared_memory->m7_to_m4_char_buffer);
-}
-
-// M4 float functions
-bool m4SendFloat(const float* data, size_t length) {
-  return floatBufferSend(&shared_memory->m4_to_m7_float_buffer, data, length);
-}
-// Stub: not implemented in your original snippet
-bool m4ReceiveFloat(float* data, size_t& length) {
-  length = 0;
-  return false; // or implement properly if needed
-}
-bool m4HasFloatMessage() {
-  return false; // or implement if you have a separate M7->M4 float buffer
-}
-
-// M4 voltage functions
-bool m4SendVoltage(const double* data, size_t length) {
-  return voltageBufferSend(&shared_memory->m4_to_m7_voltage_buffer, data, length);
-}
-// Stub: not implemented in your original snippet
-bool m4ReceiveVoltage(double* data, size_t& length) {
-  length = 0;
-  return false; // or implement properly if needed
-}
-bool m4HasVoltageMessage() {
-  return false; // or implement if there's an M7->M4 voltage buffer
 }
 
 // ---------------------------------------------------------------------------
@@ -334,14 +205,13 @@ bool m4HasVoltageMessage() {
 bool m7SendChar(const char* data, size_t length) {
   // The underlying ring buffer is only CHAR_BUFFER_SIZE bytes and stores
   // an additional 4-byte length prefix per frame (see charBufferSend()).
-  // That means the *true* maximum payload per frame is (CHAR_BUFFER_SIZE - 5).
+  // That means the *true* maximum encoded frame size is (CHAR_BUFFER_SIZE - 5).
   //
   // Large commands (e.g. AWG with many points) can exceed this, so we fragment
   // them into multiple frames and let the M4 side reassemble.
 
   constexpr size_t kCharFrameMaxPayload = (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0; // 251 for 256B ring
-  constexpr size_t kFragHeaderSize = 12; // "SMC1" + flags + ver + seq(u16) + total_len(u32)
-  constexpr uint8_t kFragVersion = 1;
+  constexpr size_t kNormalFrameOverhead = 1;
 
   auto write_le16 = [](uint8_t* p, uint16_t v) {
     p[0] = static_cast<uint8_t>(v & 0xFF);
@@ -369,17 +239,23 @@ bool m7SendChar(const char* data, size_t length) {
   };
 
   // Fast path: fits in a single ring-buffer frame.
-  if (length <= kCharFrameMaxPayload) {
-    return send_blocking(data, length);
+  if (kCharFrameMaxPayload <= kNormalFrameOverhead) {
+    return false;
+  }
+  if (length <= (kCharFrameMaxPayload - kNormalFrameOverhead)) {
+    uint8_t frame[kCharFrameMaxPayload];
+    frame[0] = CHAR_FRAME_TYPE_NORMAL;
+    memcpy(&frame[1], data, length);
+    return send_blocking(reinterpret_cast<const char*>(frame), length + 1);
   }
 
   // Fragmented path: fixed header + chunked payload.
-  if (kCharFrameMaxPayload <= kFragHeaderSize) {
+  if (kCharFrameMaxPayload <= CHAR_FRAGMENT_HEADER_SIZE) {
     // Should never happen with current sizes.
     return false;
   }
 
-  const size_t max_chunk = kCharFrameMaxPayload - kFragHeaderSize;
+  const size_t max_chunk = kCharFrameMaxPayload - CHAR_FRAGMENT_HEADER_SIZE;
   uint16_t seq = 0;
   size_t offset = 0;
 
@@ -391,23 +267,20 @@ bool m7SendChar(const char* data, size_t length) {
     const bool is_last = (offset + chunk == length);
 
     uint8_t frame[kCharFrameMaxPayload];
-    // Magic
-    frame[0] = 'S';
-    frame[1] = 'M';
-    frame[2] = 'C';
-    frame[3] = '1';
+    frame[0] = CHAR_FRAME_TYPE_FRAGMENT;
     // Flags
-    frame[4] = static_cast<uint8_t>((is_first ? 0x01 : 0x00) | (is_last ? 0x02 : 0x00));
+    frame[1] = static_cast<uint8_t>((is_first ? 0x01 : 0x00) | (is_last ? 0x02 : 0x00));
     // Version
-    frame[5] = kFragVersion;
+    frame[2] = CHAR_FRAGMENT_VERSION;
     // Sequence
-    write_le16(&frame[6], seq);
+    write_le16(&frame[3], seq);
     // Total length of the full (reassembled) message
-    write_le32(&frame[8], static_cast<uint32_t>(length));
+    write_le32(&frame[5], static_cast<uint32_t>(length));
     // Payload bytes
-    memcpy(&frame[kFragHeaderSize], data + offset, chunk);
+    memcpy(&frame[CHAR_FRAGMENT_HEADER_SIZE], data + offset, chunk);
 
-    if (!send_blocking(reinterpret_cast<const char*>(frame), kFragHeaderSize + chunk)) {
+    if (!send_blocking(reinterpret_cast<const char*>(frame),
+                       CHAR_FRAGMENT_HEADER_SIZE + chunk)) {
       return false;
     }
 
@@ -418,7 +291,119 @@ bool m7SendChar(const char* data, size_t length) {
   return true;
 }
 bool m7ReceiveChar(char* data, size_t& length) {
-  return charBufferReceive(&shared_memory->m4_to_m7_char_buffer, data, length);
+  struct CharReassemblyState {
+    bool assembling = false;
+    uint16_t next_seq = 0;
+    uint32_t expected_total = 0;
+    std::vector<char> assembled;
+  };
+  static CharReassemblyState state;
+
+  const size_t output_capacity = length;
+  char frame[CHAR_BUFFER_SIZE];
+  size_t frame_length = sizeof(frame);
+  if (!charBufferReceive(&shared_memory->m4_to_m7_char_buffer, frame,
+                         frame_length)) {
+    return false;
+  }
+
+  auto read_le16 = [](const uint8_t* p) -> uint16_t {
+    return static_cast<uint16_t>(p[0]) |
+           (static_cast<uint16_t>(p[1]) << 8);
+  };
+  auto read_le32 = [](const uint8_t* p) -> uint32_t {
+    return static_cast<uint32_t>(p[0]) |
+           (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+  };
+
+  const uint8_t* u8 = reinterpret_cast<const uint8_t*>(frame);
+  if (frame_length == 0) {
+    length = 0;
+    return false;
+  }
+
+  const uint8_t frame_type = u8[0];
+  if (frame_type == CHAR_FRAME_TYPE_NORMAL) {
+    const size_t payload_length = frame_length - 1;
+    if (payload_length > output_capacity) {
+      length = 0;
+      return false;
+    }
+
+    state = CharReassemblyState{};
+    memcpy(data, frame + 1, payload_length);
+    length = payload_length;
+    return true;
+  }
+
+  if (frame_type != CHAR_FRAME_TYPE_FRAGMENT ||
+      frame_length < CHAR_FRAGMENT_HEADER_SIZE) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  const uint8_t flags = u8[1];
+  const uint8_t version = u8[2];
+  const uint16_t seq = read_le16(&u8[3]);
+  const uint32_t total_len = read_le32(&u8[5]);
+  const bool is_first = (flags & 0x01) != 0;
+  const bool is_last = (flags & 0x02) != 0;
+
+  if (version != CHAR_FRAGMENT_VERSION || total_len == 0) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  if (is_first) {
+    state.assembling = true;
+    state.next_seq = 0;
+    state.expected_total = total_len;
+    state.assembled.clear();
+    state.assembled.reserve(total_len);
+  }
+
+  if (!state.assembling || seq != state.next_seq ||
+      total_len != state.expected_total) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  const size_t payload_len =
+      (frame_length > CHAR_FRAGMENT_HEADER_SIZE)
+          ? (frame_length - CHAR_FRAGMENT_HEADER_SIZE)
+          : 0;
+  const size_t already = state.assembled.size();
+  if (payload_len > 0 && already < state.expected_total) {
+    const size_t remaining = state.expected_total - already;
+    const size_t to_append =
+        (payload_len < remaining) ? payload_len : remaining;
+    state.assembled.insert(state.assembled.end(),
+                           frame + CHAR_FRAGMENT_HEADER_SIZE,
+                           frame + CHAR_FRAGMENT_HEADER_SIZE + to_append);
+  }
+
+  state.next_seq++;
+
+  if (!(is_last && state.assembled.size() >= state.expected_total)) {
+    length = 0;
+    return false;
+  }
+
+  if (state.expected_total > output_capacity) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  memcpy(data, state.assembled.data(), state.expected_total);
+  length = state.expected_total;
+  state = CharReassemblyState{};
+  return true;
 }
 bool m7HasCharMessage() {
   return charBufferHasMessage(&shared_memory->m4_to_m7_char_buffer);
