@@ -51,7 +51,7 @@ class FunctionRegistry {
     }
     for (const auto& entry : functions) {
       if (entry.name == upper_name) {
-        if (static_cast<int>(entry.argCount) != static_cast<int>(args.size())) {
+        if (entry.argCount >= 0 && static_cast<int>(entry.argCount) != static_cast<int>(args.size())) {
           result = OperationResult::Failure("Argument count mismatch");
           return ExecuteResult::ArgumentError;
         }
