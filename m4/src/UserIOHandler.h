@@ -70,7 +70,8 @@ struct UserIOHandler {
   static bool readCommandLine(String& out) {
     // NOTE:
     // - The M7 forwards user commands to the M4 via the shared-memory char ring.
-    // - That ring only supports ~251 payload bytes per frame.
+    // - That ring only supports ~251 encoded bytes per frame, including the
+    //   transport type/header bytes.
     // - For large commands (e.g. AWG with many points), the M7 fragments the
     //   command into multiple frames with a small binary header.
     //
@@ -102,29 +103,40 @@ struct UserIOHandler {
       return false;
     }
 
-    constexpr size_t kFragHeaderSize = 12;
     const uint8_t* u8 = reinterpret_cast<const uint8_t*>(buffer);
-    const bool is_frag = (size >= kFragHeaderSize &&
-                          u8[0] == 'S' && u8[1] == 'M' && u8[2] == 'C' && u8[3] == '1');
+    if (size == 0) {
+      return false;
+    }
 
-    if (!is_frag) {
-      // Legacy single-frame command.
+    const uint8_t frame_type = u8[0];
+    if (frame_type == CHAR_FRAME_TYPE_NORMAL) {
       assembling = false;
       next_seq = 0;
       expected_total = 0;
       assembled = "";
-      out = String(buffer, size);
+      out = String(buffer + 1, size - 1);
       return true;
-    } else {
-      const uint8_t flags = u8[4];
-      const uint8_t version = u8[5];
-      const uint16_t seq = read_le16(&u8[6]);
-      const uint32_t total_len = read_le32(&u8[8]);
+    }
+
+    if (frame_type != CHAR_FRAME_TYPE_FRAGMENT ||
+        size < CHAR_FRAGMENT_HEADER_SIZE) {
+      assembling = false;
+      next_seq = 0;
+      expected_total = 0;
+      assembled = "";
+      return false;
+    }
+
+    {
+      const uint8_t flags = u8[1];
+      const uint8_t version = u8[2];
+      const uint16_t seq = read_le16(&u8[3]);
+      const uint32_t total_len = read_le32(&u8[5]);
 
       const bool is_first = (flags & 0x01) != 0;
       const bool is_last  = (flags & 0x02) != 0;
 
-      if (version != 1 || total_len == 0) {
+      if (version != CHAR_FRAGMENT_VERSION || total_len == 0) {
         // Bad header; drop assembly state.
         assembling = false;
         next_seq = 0;
@@ -155,14 +167,17 @@ struct UserIOHandler {
         return false;
       }
 
-      const size_t payload_len = (size > kFragHeaderSize) ? (size - kFragHeaderSize) : 0;
+      const size_t payload_len =
+          (size > CHAR_FRAGMENT_HEADER_SIZE)
+              ? (size - CHAR_FRAGMENT_HEADER_SIZE)
+              : 0;
       if (payload_len > 0) {
         // Append payload bytes (ASCII command text), but never exceed expected_total.
         const uint32_t already = static_cast<uint32_t>(assembled.length());
         if (already < expected_total) {
           const uint32_t remaining = expected_total - already;
           const uint32_t to_append = (payload_len < remaining) ? static_cast<uint32_t>(payload_len) : remaining;
-          assembled.concat(reinterpret_cast<const char*>(&u8[kFragHeaderSize]),
+          assembled.concat(reinterpret_cast<const char*>(&u8[CHAR_FRAGMENT_HEADER_SIZE]),
                            static_cast<unsigned int>(to_append));
         }
       }

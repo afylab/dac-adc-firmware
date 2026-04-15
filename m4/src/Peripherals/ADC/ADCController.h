@@ -70,6 +70,14 @@ class ADCController {
     registerMemberFunction(getChFullScaleCalibration, "GET_FULL_SCALE_CAL");
     registerMemberFunction(setChZeroScaleCalibration, "SET_ZERO_SCALE_CAL");
     registerMemberFunction(setChFullScaleCalibration, "SET_FULL_SCALE_CAL");
+    registerMemberFunction(getSavedChZeroScaleCalibration,
+                           "GET_SAVED_ZERO_SCALE_CAL");
+    registerMemberFunction(getSavedChFullScaleCalibration,
+                           "GET_SAVED_FULL_SCALE_CAL");
+    registerMemberFunction(setSavedChZeroScaleCalibration,
+                           "SET_SAVED_ZERO_SCALE_CAL");
+    registerMemberFunction(setSavedChFullScaleCalibration,
+                           "SET_SAVED_FULL_SCALE_CAL");
     registerMemberFunction(resetToPreviousConversionTimesSerial,"RESET_MAINTAIN");
     registerMemberFunction(hardResetAllADCBoards, "HARD_RESET");
     registerMemberFunction(setChopping, "SET_CHOP");
@@ -86,6 +94,11 @@ class ADCController {
     return channelIndex >= 0 &&
            static_cast<size_t>(channelIndex) <
                adc_boards.size() * NUM_CHANNELS_PER_ADC_BOARD;
+  }
+
+  inline static bool isSavedChannelIndexValid(int channelIndex) {
+    return channelIndex >= 0 &&
+           channelIndex < NUM_ADC_BOARDS * NUM_CHANNELS_PER_ADC_BOARD;
   }
 
 #define getBoardIndexFromGlobalIndex(channel_index) \
@@ -145,17 +158,81 @@ class ADCController {
     return OperationResult::Success(String(data));
   }
 
+  inline static OperationResult getSavedChZeroScaleCalibration(
+      int channel_index) {
+    if (!isSavedChannelIndexValid(channel_index)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
+
+    CalibrationData data;
+    m4ReceiveCalibrationData(data);
+    return OperationResult::Success(String(data.adc_offset[channel_index]));
+  }
+
+  inline static OperationResult getSavedChFullScaleCalibration(
+      int channel_index) {
+    if (!isSavedChannelIndexValid(channel_index)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
+
+    CalibrationData data;
+    m4ReceiveCalibrationData(data);
+    return OperationResult::Success(String(data.adc_gain[channel_index]));
+  }
+
+  inline static OperationResult setSavedChZeroScaleCalibration(
+      int channel_index, uint32_t value) {
+    if (!isSavedChannelIndexValid(channel_index)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
+
+    CalibrationData data;
+    m4ReceiveCalibrationData(data);
+    data.adc_offset[channel_index] = value;
+    m4SendCalibrationData(data);
+    return OperationResult::Success("Saved zero scale calibration");
+  }
+
+  inline static OperationResult setSavedChFullScaleCalibration(
+      int channel_index, uint32_t value) {
+    if (!isSavedChannelIndexValid(channel_index)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
+
+    CalibrationData data;
+    m4ReceiveCalibrationData(data);
+    data.adc_gain[channel_index] = value;
+    m4SendCalibrationData(data);
+    return OperationResult::Success("Saved full scale calibration");
+  }
+
   inline static OperationResult setChZeroScaleCalibration(int channel_index, uint32_t value) {
+    if (!isChannelIndexValid(channel_index)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
     adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
         .setZeroScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
                                  value);
+    OperationResult save_result =
+        setSavedChZeroScaleCalibration(channel_index, value);
+    if (!save_result.isSuccess()) {
+      return save_result;
+    }
     return OperationResult::Success("Set zero scale calibration");
   }
 
   inline static OperationResult setChFullScaleCalibration(int channel_index, uint32_t value) {
+    if (!isChannelIndexValid(channel_index)) {
+      return OperationResult::Failure("Invalid channel index");
+    }
     adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
         .setFullScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
                                  value);
+    OperationResult save_result =
+        setSavedChFullScaleCalibration(channel_index, value);
+    if (!save_result.isSuccess()) {
+      return save_result;
+    }
     return OperationResult::Success("Set full scale calibration");
   }
 

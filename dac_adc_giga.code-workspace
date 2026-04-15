@@ -8,6 +8,9 @@
     },
     {
       "path": "../../afyservers-py3"
+    },
+    {
+      "path": "../firmware_uploader"
     }
   ],
   "settings": {
@@ -15,7 +18,8 @@
       "mstd_iterator": "cpp",
       "array": "cpp",
       "string": "cpp",
-      "string_view": "cpp"
+      "string_view": "cpp",
+      "vector": "cpp"
     }
   }
 }
