@@ -17,7 +17,7 @@ ADC_CHANNEL_COUNT = 8
 SERIAL_PATTERN = re.compile(r"DA_2025_.{3}$")
 SERIAL_MARKER = b"__SERIAL_NUMBER__"
 SERIAL_FIELD_LENGTH = 12
-ABC_SERIAL_NUMBER = "DA_2025_ABC"
+NO_CALIBRATION_UPLOAD_SERIAL = "DA_2025____"
 
 M4_ENVIRONMENT_MAP = {
     "giga_r1_m4_old_hardware": "OLD_HARDWARE",
@@ -323,10 +323,10 @@ def backup_device_state(port):
         wait_for_ready(ser)
         source_environment = send_command(ser, "GET_ENVIRONMENT")
         serial_number = send_command(ser, "SERIAL_NUMBER")
-        if is_placeholder_serial(serial_number):
+        if is_no_calibration_upload_serial(serial_number):
             return {
                 "skip": True,
-                "skip_reason": "placeholder_serial",
+                "skip_reason": "no_calibration_upload_serial",
             }
 
         if not SERIAL_PATTERN.fullmatch(serial_number or ""):
@@ -379,8 +379,8 @@ def load_state(env):
     return json.loads(state_path.read_text())
 
 
-def is_placeholder_serial(serial_number):
-    return serial_number == ABC_SERIAL_NUMBER
+def is_no_calibration_upload_serial(serial_number):
+    return serial_number == NO_CALIBRATION_UPLOAD_SERIAL
 
 
 def firmware_hangs_on_noop(ser):

@@ -322,6 +322,9 @@ class God2D {
       currentSlowPosition[i] = startPoint[i];
     }
 
+    float fastV0s[numDacChannels];
+    float fastVfs[numDacChannels];
+
     setStopFlag(false);
     PeripheralCommsController::dataLedOn();
 
@@ -335,14 +338,13 @@ class God2D {
 
       // Calculate start and end voltages for fast axis ramp
       // Position = currentSlowPosition + t * fastAxisVector (where t goes from 0 to 1)
-      float fastV0s[numDacChannels];
-      float fastVfs[numDacChannels];
-      
-      for (int i = 0; i < numDacChannels; ++i) {
-        if (isReverse) {
+      if (isReverse) {
+        for (int i = 0; i < numDacChannels; ++i) {
           fastV0s[i] = currentSlowPosition[i] + fastAxisVector[i];
           fastVfs[i] = currentSlowPosition[i];
-        } else {
+        }
+      } else {
+        for (int i = 0; i < numDacChannels; ++i) {
           fastV0s[i] = currentSlowPosition[i];
           fastVfs[i] = currentSlowPosition[i] + fastAxisVector[i];
         }
