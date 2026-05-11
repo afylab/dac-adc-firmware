@@ -1,6 +1,10 @@
 import json
 import re
+import signal
+import threading
 import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import serial
@@ -12,12 +16,16 @@ SERIAL_TIMEOUT_S = 2
 READY_RETRY_COUNT = 60
 READY_RETRY_DELAY_S = 0.5
 CALIBRATION_WRITE_DELAY_S = 0.05
+CALIBRATION_DOWNLOAD_TIMEOUT_S = 10
+CALIBRATION_UPLOAD_TIMEOUT_S = 10
+CALIBRATION_VERIFY_TIMEOUT_S = 10
 FLOAT_VERIFY_ABS_TOL = 1e-6
 ADC_CHANNEL_COUNT = 8
 SERIAL_PATTERN = re.compile(r"DA_2025_.{3}$")
 SERIAL_MARKER = b"__SERIAL_NUMBER__"
 SERIAL_FIELD_LENGTH = 12
 NO_CALIBRATION_UPLOAD_SERIAL = "DA_2025____"
+DEFAULT_CALIBRATION_BACKUP_DIR_NAME = "calibration_backups"
 
 M4_ENVIRONMENT_MAP = {
     "giga_r1_m4_old_hardware": "OLD_HARDWARE",
@@ -30,12 +38,68 @@ def log(message):
     print(f"[upload-persistence] {message}")
 
 
+class CalibrationOperationTimeout(RuntimeError):
+    pass
+
+
+@contextmanager
+def operation_timeout(seconds, operation_name):
+    if threading.current_thread() is not threading.main_thread():
+        yield
+        return
+
+    def handle_timeout(_signum, _frame):
+        raise CalibrationOperationTimeout(
+            f"Timed out {operation_name} after {seconds} seconds."
+        )
+
+    previous_handler = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, handle_timeout)
+    previous_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+        if previous_timer[0] > 0:
+            signal.setitimer(signal.ITIMER_REAL, previous_timer[0], previous_timer[1])
+
+
 def get_state_path(env):
     return Path(env.subst("$BUILD_DIR")) / "upload_state.json"
 
 
 def get_binary_path(env):
     return Path(env.subst("$BUILD_DIR")) / f"{env.subst('${PROGNAME}')}.bin"
+
+
+def get_project_root(env):
+    return Path(env.subst("$PROJECT_DIR")).parent
+
+
+def get_calibration_backup_dir(env):
+    configured = env.get("CALIBRATION_BACKUP_DIR")
+    if configured:
+        return Path(env.subst(configured)).expanduser()
+    return get_project_root(env) / DEFAULT_CALIBRATION_BACKUP_DIR_NAME
+
+
+def get_calibration_backup_path(env, state):
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    serial_number = state["serial_number"].replace("/", "_")
+    backup_dir = get_calibration_backup_dir(env)
+    backup_path = backup_dir / f"calibration_{serial_number}_{timestamp}.json"
+    if not backup_path.exists():
+        return backup_path
+
+    index = 2
+    while True:
+        candidate = (
+            backup_dir / f"calibration_{serial_number}_{timestamp}_{index}.json"
+        )
+        if not candidate.exists():
+            return candidate
+        index += 1
 
 
 KNOWN_GIGA_VIDS_PIDS = {
@@ -222,6 +286,116 @@ def read_adc_calibration(ser):
         )
 
 
+def make_calibration_state(
+    source_environment,
+    serial_number,
+    firmware_version,
+    device_id,
+    dac_offsets,
+    dac_gains,
+    adc_zero_scale,
+    adc_full_scale,
+):
+    return {
+        "schema_version": 1,
+        "saved_at": datetime.now(timezone.utc).isoformat(),
+        "source_environment": source_environment,
+        "serial_number": serial_number,
+        "firmware_version": firmware_version,
+        "device_id": device_id,
+        "dac_channel_count": len(dac_offsets),
+        "adc_channel_count": ADC_CHANNEL_COUNT,
+        "dac_offsets": dac_offsets,
+        "dac_gains": dac_gains,
+        "adc_zero_scale": adc_zero_scale,
+        "adc_full_scale": adc_full_scale,
+    }
+
+
+def validate_calibration_state(state):
+    required_keys = {
+        "schema_version",
+        "saved_at",
+        "source_environment",
+        "serial_number",
+        "firmware_version",
+        "device_id",
+        "dac_channel_count",
+        "adc_channel_count",
+        "dac_offsets",
+        "dac_gains",
+        "adc_zero_scale",
+        "adc_full_scale",
+    }
+    missing = sorted(required_keys - set(state))
+    if missing:
+        raise RuntimeError(f"Calibration state is missing keys: {', '.join(missing)}")
+    if state["schema_version"] != 1:
+        raise RuntimeError(
+            f"Unsupported calibration schema_version: {state['schema_version']}"
+        )
+    if state["adc_channel_count"] != ADC_CHANNEL_COUNT:
+        raise RuntimeError(
+            f"Unsupported ADC channel count: {state['adc_channel_count']}"
+        )
+    if len(state["dac_offsets"]) != state["dac_channel_count"]:
+        raise RuntimeError("DAC offset count does not match dac_channel_count.")
+    if len(state["dac_gains"]) != state["dac_channel_count"]:
+        raise RuntimeError("DAC gain count does not match dac_channel_count.")
+    if len(state["adc_zero_scale"]) != ADC_CHANNEL_COUNT:
+        raise RuntimeError("ADC zero-scale count does not match adc_channel_count.")
+    if len(state["adc_full_scale"]) != ADC_CHANNEL_COUNT:
+        raise RuntimeError("ADC full-scale count does not match adc_channel_count.")
+
+
+def comparable_calibration_state(state):
+    comparable = dict(state)
+    comparable.pop("saved_at", None)
+    return comparable
+
+
+def remove_older_duplicate_calibration_files(backup_path, state):
+    backup_dir = backup_path.parent
+    if not backup_dir.exists():
+        return []
+
+    comparable_state = comparable_calibration_state(state)
+    removed_paths = []
+    for candidate in backup_dir.glob("*.json"):
+        if candidate == backup_path:
+            continue
+        try:
+            candidate_state = json.loads(candidate.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if comparable_calibration_state(candidate_state) != comparable_state:
+            continue
+        candidate.unlink()
+        removed_paths.append(candidate)
+    return removed_paths
+
+
+def write_calibration_backup_file(env, state):
+    validate_calibration_state(state)
+    backup_path = get_calibration_backup_path(env, state)
+    backup_path.parent.mkdir(parents=True, exist_ok=True)
+    backup_path.write_text(json.dumps(state, indent=2) + "\n")
+    saved_state = json.loads(backup_path.read_text())
+    if saved_state != state:
+        raise RuntimeError(
+            f"Calibration backup file verification failed: {backup_path}"
+        )
+
+    removed_paths = remove_older_duplicate_calibration_files(backup_path, state)
+    if removed_paths:
+        log(
+            "Removed older duplicate calibration backup(s): "
+            + ", ".join(str(path) for path in removed_paths)
+        )
+    log(f"Calibration backup saved to {backup_path}.")
+    return backup_path
+
+
 def write_adc_calibration_with_commands(ser, zero_cmd, full_cmd, state):
     for channel, value in enumerate(state["adc_zero_scale"]):
         send_command(ser, f"{zero_cmd},{channel},{value}")
@@ -323,6 +497,8 @@ def backup_device_state(port):
         wait_for_ready(ser)
         source_environment = send_command(ser, "GET_ENVIRONMENT")
         serial_number = send_command(ser, "SERIAL_NUMBER")
+        firmware_version = send_command(ser, "GET_FIRMWARE_VERSION")
+        device_id = send_command(ser, "*IDN?")
         if is_no_calibration_upload_serial(serial_number):
             return {
                 "skip": True,
@@ -339,14 +515,16 @@ def backup_device_state(port):
         )
         adc_zero_scale, adc_full_scale = read_adc_calibration(ser)
 
-    return {
-        "source_environment": source_environment,
-        "serial_number": serial_number,
-        "dac_offsets": dac_offsets,
-        "dac_gains": dac_gains,
-        "adc_zero_scale": adc_zero_scale,
-        "adc_full_scale": adc_full_scale,
-    }
+    return make_calibration_state(
+        source_environment,
+        serial_number,
+        firmware_version,
+        device_id,
+        dac_offsets,
+        dac_gains,
+        adc_zero_scale,
+        adc_full_scale,
+    )
 
 
 def patch_binary_serial(binary_path, serial_number):
@@ -402,7 +580,22 @@ def run_pre_upload(env):
     if port is None:
         raise RuntimeError("Arduino GIGA not found before upload.")
 
-    state = backup_device_state(port)
+    try:
+        with operation_timeout(
+            CALIBRATION_DOWNLOAD_TIMEOUT_S, "downloading calibration data"
+        ):
+            state = backup_device_state(port)
+    except CalibrationOperationTimeout as exc:
+        log(f"{exc} Proceeding with firmware upload without calibration backup.")
+        save_state(
+            env,
+            {
+                "skip": True,
+                "skip_reason": "calibration_download_timeout",
+                "source_port": port,
+            },
+        )
+        return
     state["source_port"] = port
     if state.get("skip"):
         log(
@@ -411,7 +604,10 @@ def run_pre_upload(env):
         )
         save_state(env, state)
         return
-    
+
+    backup_path = write_calibration_backup_file(env, state)
+    state["calibration_backup_path"] = str(backup_path)
+
     log(
         "Backed up device state "
         f"(env={state['source_environment']}, serial={state['serial_number']})."
@@ -443,7 +639,19 @@ def run_post_upload(env):
 
     port = wait_for_device_ready(env, port=state.get("source_port"))
     log(f"Restoring calibration on {port}...")
-    restore_calibration(port, state)
-    verify_calibration(port, state)
+    try:
+        with operation_timeout(
+            CALIBRATION_UPLOAD_TIMEOUT_S, "uploading calibration data"
+        ):
+            restore_calibration(port, state)
+        with operation_timeout(
+            CALIBRATION_VERIFY_TIMEOUT_S, "verifying calibration data"
+        ):
+            verify_calibration(port, state)
+    except Exception:
+        backup_path = state.get("calibration_backup_path")
+        if backup_path:
+            log(f"Calibration backup remains saved at {backup_path}.")
+        raise
     delete_state(env)
     log("Calibration and serial verification passed after upload.")
