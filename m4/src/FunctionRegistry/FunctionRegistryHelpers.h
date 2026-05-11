@@ -1,52 +1,75 @@
-// RegisterFunctions.h
 #pragma once
+
 #include <cassert>
 #include <tuple>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
-#include "CallFunctionHelper.h"
 #include "FunctionRegistry/FunctionRegistry.h"
-#include "FunctionTraits.h"
 #include "Peripherals/OperationResult.h"
 
-// Template function to register functions with automatically deduced number of
-// arguments
+namespace FunctionRegistryDetail {
+
+template <typename T>
+struct FunctionTraits;
+
+template <typename ReturnType, typename... Args>
+struct FunctionTraits<ReturnType (*)(Args...)> {
+  using return_type = ReturnType;
+  using args_tuple = std::tuple<Args...>;
+  static constexpr size_t arity = sizeof...(Args);
+};
+
+template <typename ClassType, typename ReturnType, typename... Args>
+struct FunctionTraits<ReturnType (ClassType::*)(Args...)> {
+  using return_type = ReturnType;
+  using args_tuple = std::tuple<Args...>;
+  static constexpr size_t arity = sizeof...(Args);
+};
+
+template <typename ClassType, typename ReturnType, typename... Args>
+struct FunctionTraits<ReturnType (ClassType::*)(Args...) const> {
+  using return_type = ReturnType;
+  using args_tuple = std::tuple<Args...>;
+  static constexpr size_t arity = sizeof...(Args);
+};
+
+template <typename Functor>
+struct FunctionTraits : public FunctionTraits<decltype(&Functor::operator())> {
+};
+
+template <typename Function, typename Tuple, size_t... Is>
+auto callFunctionHelper(Function function, const std::vector<float>& args,
+                        std::index_sequence<Is...>)
+    -> decltype(function(
+        static_cast<typename std::tuple_element<Is, Tuple>::type>(args[Is])...)) {
+  return function(
+      static_cast<typename std::tuple_element<Is, Tuple>::type>(args[Is])...);
+}
+
+}  // namespace FunctionRegistryDetail
+
 template <typename Function>
 void registerMemberFunction(Function function, const String& commandName) {
-  using Traits = FunctionTraits<Function>;
-  constexpr size_t argCountSizeT = Traits::arity;
-  constexpr int argCount = static_cast<int>(
-      argCountSizeT);  // Ensure it matches FunctionRegistry's expected type
+  using Traits = FunctionRegistryDetail::FunctionTraits<Function>;
+  constexpr int argCount = static_cast<int>(Traits::arity);
 
   using ArgsTuple = typename Traits::args_tuple;
 
-  // Create a lambda that matches the expected signature for FunctionRegistry
   auto wrapper = [function](const std::vector<float>& args) -> OperationResult {
-    // Ensure the number of arguments matches
     assert(args.size() == Traits::arity &&
            "Incorrect number of arguments provided.");
 
-    // Call the helper to invoke the function with unpacked and casted arguments
-    return callFunctionHelper<Function, ArgsTuple>(
+    return FunctionRegistryDetail::callFunctionHelper<Function, ArgsTuple>(
         function, args, std::make_index_sequence<Traits::arity>{});
   };
 
-  // Register the function with FunctionRegistry
-  FunctionRegistry::registerFunction(
-      commandName, wrapper,
-      argCount  // Ensure this matches the expected type (int)
-  );
+  FunctionRegistry::registerFunction(commandName, wrapper, argCount);
 }
 
-// Template function to register functions that accept a vector of arguments
-// directly
 template <typename Function>
 void registerMemberFunctionVector(Function function,
                                   const String& commandName) {
-  FunctionRegistry::registerFunction(commandName, function,
-                                     -1  // Use -1 or another sentinel value to
-                                         // indicate variable argument count
-  );
+  FunctionRegistry::registerFunction(commandName, function, -1);
 }

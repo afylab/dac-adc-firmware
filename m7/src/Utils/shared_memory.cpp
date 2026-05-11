@@ -1,5 +1,4 @@
 #include "shared_memory.h"
-#include <SDRAM.h>
 #include <vector>
 
 #define SDRAM_START_ADDRESS 0x38000000
@@ -7,8 +6,6 @@
 SharedMemory* shared_memory = nullptr;
 
 bool initSharedMemory() {
-  SDRAM.begin(SDRAM_START_ADDRESS);
-
   shared_memory = reinterpret_cast<SharedMemory*>(SDRAM_START_ADDRESS);
 
   shared_memory->m4_to_m7_char_buffer.read_index = 0;

@@ -6,7 +6,6 @@
 #define NUM_CHANNELS_PER_ADC_BOARD 4
 
 #ifdef __OLD_SHIELD__
-#warning "OLD_SHIELD is active"
 #define NUM_ADC_BOARDS 2
 #define NUM_DAC_CHANNELS 4
 const int adc_cs_pins[NUM_ADC_BOARDS] = {48, 42}; // SYNC for both 24-bit ADCs
@@ -20,7 +19,6 @@ const int drdy[NUM_ADC_BOARDS] = {50, 40}; // data_ready pin for both ADCs -- us
 const static SPISettings DAC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE1);
 const static SPISettings ADC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
 #else
-#warning "NEW_SHIELD is active"
 #define NUM_ADC_BOARDS 2
 #define NUM_DAC_CHANNELS 16
 const int adc_cs_pins[NUM_ADC_BOARDS] = {39,40};//,41,42};
@@ -49,9 +47,9 @@ const static SPISettings ADC_SPI_SETTINGS(8000000, MSBFIRST, SPI_MODE0);
 
 // Global DAC voltage limits - channel specific arrays
 namespace DACLimits {
-  inline float upper_voltage_limit[NUM_DAC_CHANNELS];
-  inline float lower_voltage_limit[NUM_DAC_CHANNELS];
-  inline bool limits_initialized = false;
+  extern float upper_voltage_limit[NUM_DAC_CHANNELS];
+  extern float lower_voltage_limit[NUM_DAC_CHANNELS];
+  extern bool limits_initialized;
   
   // Initialize all channel limits to default values
   inline void initializeLimits() {
@@ -64,4 +62,3 @@ namespace DACLimits {
     }
   }
 }
-
