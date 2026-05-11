@@ -313,11 +313,11 @@
 
   std::vector<double> ADCBoard::continuousConvert(int channel_index, uint32_t period_us,
                                         uint32_t duration) {
-    std::vector<double> data;
     uint32_t num_samples = duration / period_us;
+    std::vector<double> data(num_samples);
     startContinuousConversion(channel_index);
     for (uint32_t i = 0; i < num_samples; i++) {
-      data.push_back(ADC2DOUBLE(getConversionData(channel_index)));
+      data[i] = ADC2DOUBLE(getConversionData(channel_index));
       delayMicroseconds(period_us);
     }
     idleMode(channel_index);
@@ -505,24 +505,27 @@
 
   byte ADCBoard::calculateFilterWord(float time_us, bool chop,
                            bool moreThanOneChannelActive) {
-    byte out;
+    double raw;
+    int minimumFilterWord;
     if (chop) {
       if (moreThanOneChannelActive) {
-        out = static_cast<byte>(round((time_us * 6.144 - 249.0) / 128.0));
+        raw = round((time_us * 6.144 - 249.0) / 128.0);
       } else {
-        out = static_cast<byte>(round((time_us * 6.144 - 248.0) / 128.0));
+        raw = round((time_us * 6.144 - 248.0) / 128.0);
       }
-      if (out < 2) return 2;
+      minimumFilterWord = 2;
     } else {
       if (moreThanOneChannelActive) {
-        out = static_cast<byte>(round((time_us * 6.144 - 206.0) / 64.0));
+        raw = round((time_us * 6.144 - 206.0) / 64.0);
       } else {
-        out = static_cast<byte>(round((time_us * 6.144 - 207.0) / 64.0));
+        raw = round((time_us * 6.144 - 207.0) / 64.0);
       }
-      if (out < 3) return 3;
+      minimumFilterWord = 3;
     }
+    int out = static_cast<int>(raw);
+    if (out < minimumFilterWord) return static_cast<byte>(minimumFilterWord);
     if (out > 127) return 127;
-    return out;
+    return static_cast<byte>(out);
   }
 
 

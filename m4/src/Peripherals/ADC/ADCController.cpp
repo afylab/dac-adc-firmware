@@ -14,13 +14,13 @@ int ADCController::getChannelIndexFromGlobalIndex(int channel_index) {
 }
 
 void ADCController::initialize() {
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     board.initialize();
   }
 }
 
 void ADCController::resetToPreviousConversionTimes() {
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     board.resetToPreviousConversionTimes();
   }
 }
@@ -32,7 +32,7 @@ void ADCController::setup() {
 #endif
 
   initializeRegistry();
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     board.setup();
   }
 }
@@ -205,12 +205,11 @@ OperationResult ADCController::setSavedChFullScaleCalibration(
 
 OperationResult ADCController::setChZeroScaleCalibration(int channel_index,
                                                          uint32_t value) {
-  if (!isChannelIndexValid(channel_index)) {
-    return OperationResult::Failure("Invalid channel index");
+  OperationResult apply_result =
+      applyChZeroScaleCalibration(channel_index, value);
+  if (!apply_result.isSuccess()) {
+    return apply_result;
   }
-  adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
-      .setZeroScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
-                               value);
   OperationResult save_result =
       setSavedChZeroScaleCalibration(channel_index, value);
   if (!save_result.isSuccess()) {
@@ -221,18 +220,39 @@ OperationResult ADCController::setChZeroScaleCalibration(int channel_index,
 
 OperationResult ADCController::setChFullScaleCalibration(int channel_index,
                                                          uint32_t value) {
-  if (!isChannelIndexValid(channel_index)) {
-    return OperationResult::Failure("Invalid channel index");
+  OperationResult apply_result =
+      applyChFullScaleCalibration(channel_index, value);
+  if (!apply_result.isSuccess()) {
+    return apply_result;
   }
-  adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
-      .setFullScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
-                               value);
   OperationResult save_result =
       setSavedChFullScaleCalibration(channel_index, value);
   if (!save_result.isSuccess()) {
     return save_result;
   }
   return OperationResult::Success("Set full scale calibration");
+}
+
+OperationResult ADCController::applyChZeroScaleCalibration(int channel_index,
+                                                           uint32_t value) {
+  if (!isChannelIndexValid(channel_index)) {
+    return OperationResult::Failure("Invalid channel index");
+  }
+  adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
+      .setZeroScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
+                               value);
+  return OperationResult::Success("Applied zero scale calibration");
+}
+
+OperationResult ADCController::applyChFullScaleCalibration(int channel_index,
+                                                           uint32_t value) {
+  if (!isChannelIndexValid(channel_index)) {
+    return OperationResult::Failure("Invalid channel index");
+  }
+  adc_boards[getBoardIndexFromGlobalIndex(channel_index)]
+      .setFullScaleCalibration(getChannelIndexFromGlobalIndex(channel_index),
+                               value);
+  return OperationResult::Success("Applied full scale calibration");
 }
 
 OperationResult ADCController::resetToPreviousConversionTimesSerial() {
@@ -314,7 +334,7 @@ OperationResult ADCController::idleMode(int adc_channel) {
 
 OperationResult ADCController::getChannelsActive() {
   std::vector<int> statuses;
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       if (board.isChannelActive(i)) {
         statuses.push_back(i);
@@ -339,7 +359,7 @@ OperationResult ADCController::hardResetAllADCBoards() {
 }
 
 OperationResult ADCController::resetAllADCBoards() {
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     board.reset();
   }
   return OperationResult::Success();
@@ -347,21 +367,21 @@ OperationResult ADCController::resetAllADCBoards() {
 
 OperationResult ADCController::talkADC(byte command) {
   String results = "";
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     results += String(board.talkADC(command), 9) + "\n";
   }
   return OperationResult::Success(results);
 }
 
 OperationResult ADCController::adcZeroScaleCal() {
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     board.zeroScaleSelfCalibration();
   }
   return OperationResult::Success("CALIBRATION_FINISHED");
 }
 
 OperationResult ADCController::adcChannelSystemZeroScaleCal() {
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       board.zeroScaleChannelSystemSelfCalibration(i);
     }
@@ -370,7 +390,7 @@ OperationResult ADCController::adcChannelSystemZeroScaleCal() {
 }
 
 OperationResult ADCController::adcChannelSystemFullScaleCal() {
-  for (auto board : adc_boards) {
+  for (auto& board : adc_boards) {
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       board.fullScaleChannelSystemSelfCalibration(i);
     }

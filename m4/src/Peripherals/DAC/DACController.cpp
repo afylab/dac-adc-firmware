@@ -70,7 +70,7 @@ void DACController::addChannel(int cs_pin) {
 }
 
 bool DACController::initialize() {
-  for (auto channel : dac_channels) {
+  for (auto& channel : dac_channels) {
     channel.initialize();
   }
   return true;
@@ -82,7 +82,7 @@ void DACController::setup() {
   pinMode(ldac, OUTPUT);
   digitalWrite(ldac, HIGH);
   initializeRegistry();
-  for (auto channel : dac_channels) {
+  for (auto& channel : dac_channels) {
     channel.setup();
   }
 }
@@ -105,7 +105,7 @@ OperationResult DACController::setVoltage(int channel_index, float voltage) {
                                     String(channel_index));
   }
 
-  DACChannel dac_channel = dac_channels[channel_index];
+  DACChannel& dac_channel = dac_channels[channel_index];
   if (voltage < dac_channel.getHardwareLowerBound() ||
       voltage > dac_channel.getHardwareUpperBound()) {
     return OperationResult::Failure(
@@ -124,19 +124,19 @@ OperationResult DACController::setVoltage(int channel_index, float voltage) {
                                   " UPDATED TO " + String(v, 6) + " V");
 }
 
-void DACController::setVoltageNoTransactionNoLdac(int channel_index,
+bool DACController::setVoltageNoTransactionNoLdac(int channel_index,
                                                   float voltage) {
   if (!isChannelIndexValid(channel_index)) {
-    return;
+    return false;
   }
 
-  DACChannel dac_channel = dac_channels[channel_index];
+  DACChannel& dac_channel = dac_channels[channel_index];
   if (voltage < dac_channel.getHardwareLowerBound() ||
       voltage > dac_channel.getHardwareUpperBound()) {
-    return;
+    return false;
   }
 
-  dac_channel.setVoltageNoTransactionNoLdac(voltage);
+  return dac_channel.setVoltageNoTransactionNoLdac(voltage);
 }
 
 OperationResult DACController::toggleLdacTest() {
@@ -169,12 +169,21 @@ OperationResult DACController::setOSG(int channel_index, float offset,
   return OperationResult::Success("OSG SET FOR DAC " + String(channel_index));
 }
 
-void DACController::setCalibration(int channel_index, float offset, float gain) {
+void DACController::applyCalibration(int channel_index, float offset,
+                                     float gain) {
   if (!isChannelIndexValid(channel_index)) {
     return;
   }
 
   dac_channels[channel_index].setCalibration(offset, gain);
+}
+
+void DACController::setCalibration(int channel_index, float offset, float gain) {
+  if (!isChannelIndexValid(channel_index)) {
+    return;
+  }
+
+  applyCalibration(channel_index, offset, gain);
   CalibrationData calibrationData = getCalibrationData();
   m4SendCalibrationData(calibrationData);
 }
@@ -227,11 +236,11 @@ OperationResult DACController::setFullScale(int channel, float full_scale) {
 
 OperationResult DACController::inquiryOSG() {
   String output = "";
-  for (auto channel : dac_channels) {
+  for (auto& channel : dac_channels) {
     float offset = channel.getOffsetError();
     m4SendFloat(&offset, 1);
   }
-  for (auto channel : dac_channels) {
+  for (auto& channel : dac_channels) {
     float gain = channel.getGainError();
     m4SendFloat(&gain, 1);
   }
@@ -265,12 +274,17 @@ OperationResult DACController::autoRampN(const std::vector<float>& args) {
   int numSteps = static_cast<int>(args[1]);
   unsigned long settlingTime_us = static_cast<unsigned long>(args[2]);
 
+  if (numDacs < 1 || numDacs > NUM_DAC_CHANNELS || numSteps < 1 ||
+      settlingTime_us < 1) {
+    return OperationResult::Failure("Invalid ramp parameters.");
+  }
+
   if (args.size() != static_cast<size_t>(3 + numDacs * 3)) {
     return OperationResult::Failure(
         "Argument count does not match number of DAC channels.");
   }
 
-  RampParams* rampParams = new RampParams[numDacs];
+  RampParams rampParams[NUM_DAC_CHANNELS] = {};
   int rampParamsCount = 0;
 
   for (int i = 0; i < numDacs; i++) {
@@ -280,28 +294,26 @@ OperationResult DACController::autoRampN(const std::vector<float>& args) {
     double vf = args[baseIndex + 2];
 
     if (!isChannelIndexValid(ch)) {
-      delete[] rampParams;
       return OperationResult::Failure("Invalid channel index " + String(ch));
     }
 
-    DACChannel dacCh = dac_channels[ch];
+    DACChannel& dacCh = dac_channels[ch];
     if (v0 < dacCh.getHardwareLowerBound() ||
         v0 > dacCh.getHardwareUpperBound() ||
         vf < dacCh.getHardwareLowerBound() ||
         vf > dacCh.getHardwareUpperBound()) {
-      delete[] rampParams;
       return OperationResult::Failure("Voltage out of bounds for DAC " +
                                       String(ch));
     }
 
-    double stepSize = (vf - v0) / (numSteps - 1);
+    double stepSize = numSteps > 1 ? (vf - v0) / (numSteps - 1) : 0.0;
     rampParams[rampParamsCount++] = {ch, v0, vf, stepSize};
   }
 
   int currentStep = 0;
   TimingUtil::setupTimerOnlyDac(settlingTime_us);
 
-  double* currentVoltages = new double[rampParamsCount];
+  double currentVoltages[NUM_DAC_CHANNELS] = {};
   for (int i = 0; i < rampParamsCount; i++) {
     currentVoltages[i] = rampParams[i].v0;
   }
@@ -330,9 +342,6 @@ OperationResult DACController::autoRampN(const std::vector<float>& args) {
               " TO " + String(param.vf) + "; ";
   }
   output += "IN " + String(numSteps) + " STEPS";
-
-  delete[] currentVoltages;
-  delete[] rampParams;
 
   if (getStopFlag()) {
     setStopFlag(false);

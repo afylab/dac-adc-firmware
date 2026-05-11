@@ -1,6 +1,5 @@
 #pragma once
 #include <Arduino.h>
-#include <SPI.h>
 
 #define NUM_CHANNELS_PER_DAC_BOARD 4
 #define NUM_CHANNELS_PER_ADC_BOARD 4
@@ -16,8 +15,10 @@ const int drdy[NUM_ADC_BOARDS] = {50, 40}; // data_ready pin for both ADCs -- us
 #define led 7 // indicator LED
 #define data_pin 6 // data indicator LED
 #define err 11 // error indicator LED
-const static SPISettings DAC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE1);
-const static SPISettings ADC_SPI_SETTINGS(4000000, MSBFIRST, SPI_MODE3);
+constexpr uint32_t DAC_SPI_FREQUENCY_HZ = 4000000;
+constexpr uint8_t DAC_SPI_MODE = 1;
+constexpr uint32_t ADC_SPI_FREQUENCY_HZ = 4000000;
+constexpr uint8_t ADC_SPI_MODE = 3;
 #else
 #define NUM_ADC_BOARDS 2
 #define NUM_DAC_CHANNELS 16
@@ -41,8 +42,10 @@ const int drdy[NUM_ADC_BOARDS] = {47,48};//,49,50};
 #define led 7 // indicator LED
 #define data_pin 6 // data indicator LED
 #define err 11 // error indicator LED
-const static SPISettings DAC_SPI_SETTINGS(22000000, MSBFIRST, SPI_MODE1 ); 
-const static SPISettings ADC_SPI_SETTINGS(8000000, MSBFIRST, SPI_MODE0);
+constexpr uint32_t DAC_SPI_FREQUENCY_HZ = 22000000;
+constexpr uint8_t DAC_SPI_MODE = 1;
+constexpr uint32_t ADC_SPI_FREQUENCY_HZ = 8000000;
+constexpr uint8_t ADC_SPI_MODE = 0;
 #endif
 
 // Global DAC voltage limits - channel specific arrays

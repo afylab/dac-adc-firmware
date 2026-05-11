@@ -14,6 +14,26 @@ bool isValidDacChannelCount(int count) {
 bool isValidAdcChannelCount(int count) {
   return count >= 1 && count <= kMaxAdcChannels;
 }
+
+OperationResult validateDacChannels(const int* channels, int count) {
+  for (int i = 0; i < count; i++) {
+    if (!DACController::isChannelIndexValid(channels[i])) {
+      return OperationResult::Failure("Invalid DAC channel index " +
+                                      String(channels[i]));
+    }
+  }
+  return OperationResult::Success();
+}
+
+OperationResult validateAdcChannels(const int* channels, int count) {
+  for (int i = 0; i < count; i++) {
+    if (!ADCController::isChannelIndexValid(channels[i])) {
+      return OperationResult::Failure("Invalid ADC channel index " +
+                                      String(channels[i]));
+    }
+  }
+  return OperationResult::Success();
+}
 }
 
   void God2D::setup() { initializeRegistry(); }
@@ -75,9 +95,12 @@ bool isValidAdcChannelCount(int count) {
       return OperationResult::Failure("Invalid number of steps");
     }
 
-    // Validate we have enough arguments
-    if (args.size() < currentIndex + numDacChannels + 3 * numDacChannels + numAdcChannels) {
-      return OperationResult::Failure("Insufficient arguments for 2D ramp");
+    const size_t expected =
+        currentIndex + static_cast<size_t>(numDacChannels) +
+        3u * static_cast<size_t>(numDacChannels) +
+        static_cast<size_t>(numAdcChannels);
+    if (args.size() != expected) {
+      return OperationResult::Failure("Incorrect number of arguments for 2D ramp");
     }
 
     // Parse DAC channel IDs
@@ -112,6 +135,17 @@ bool isValidAdcChannelCount(int count) {
     int adcChannels[kMaxAdcChannels] = {};
     for (int i = 0; i < numAdcChannels; ++i) {
       adcChannels[i] = static_cast<int>(args[currentIndex++]);
+    }
+
+    OperationResult dacValidation =
+        validateDacChannels(dacChannels, numDacChannels);
+    if (!dacValidation.isSuccess()) {
+      return dacValidation;
+    }
+    OperationResult adcValidation =
+        validateAdcChannels(adcChannels, numAdcChannels);
+    if (!adcValidation.isSuccess()) {
+      return adcValidation;
     }
 
     // Check voltage bounds for all four corners of the 2D scan rectangle (both calibrated bounds AND global limits)
@@ -228,6 +262,13 @@ bool isValidAdcChannelCount(int count) {
 
     PeripheralCommsController::dataLedOff();
 
+    if (!rampResult.isSuccess()) {
+      if (getStopFlag()) {
+        setStopFlag(false);
+      }
+      return rampResult;
+    }
+
     if (getStopFlag()) {
       setStopFlag(false);
       return OperationResult::Failure("2D RAMPING_STOPPED");
@@ -291,9 +332,12 @@ bool isValidAdcChannelCount(int count) {
       return OperationResult::Failure("Invalid number of steps");
     }
 
-    // Validate we have enough arguments
-    if (args.size() < currentIndex + numDacChannels + 3 * numDacChannels + numAdcChannels) {
-      return OperationResult::Failure("Insufficient arguments for 2D ramp");
+    const size_t expected =
+        currentIndex + static_cast<size_t>(numDacChannels) +
+        3u * static_cast<size_t>(numDacChannels) +
+        static_cast<size_t>(numAdcChannels);
+    if (args.size() != expected) {
+      return OperationResult::Failure("Incorrect number of arguments for 2D ramp");
     }
 
     // Parse DAC channel IDs
@@ -328,6 +372,17 @@ bool isValidAdcChannelCount(int count) {
     int adcChannels[kMaxAdcChannels] = {};
     for (int i = 0; i < numAdcChannels; ++i) {
       adcChannels[i] = static_cast<int>(args[currentIndex++]);
+    }
+
+    OperationResult dacValidation =
+        validateDacChannels(dacChannels, numDacChannels);
+    if (!dacValidation.isSuccess()) {
+      return dacValidation;
+    }
+    OperationResult adcValidation =
+        validateAdcChannels(adcChannels, numAdcChannels);
+    if (!adcValidation.isSuccess()) {
+      return adcValidation;
     }
 
     // Check voltage bounds for all four corners of the 2D scan rectangle (both calibrated bounds AND global limits)
@@ -443,6 +498,13 @@ bool isValidAdcChannelCount(int count) {
                                          boardUsage);
 
     PeripheralCommsController::dataLedOff();
+
+    if (!rampResult.isSuccess()) {
+      if (getStopFlag()) {
+        setStopFlag(false);
+      }
+      return rampResult;
+    }
 
     if (getStopFlag()) {
       setStopFlag(false);

@@ -57,9 +57,11 @@ DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) 
 
     byte bytesToSend[3] = {b1, b2, b3};
 
-    commsController.transferDAC(bytesToSend,
-                             3);  // send command byte to DAC; MS data bits,
-                                  // DAC2; LS 8 data bits, DAC2
+    if (!commsController.transferDAC(bytesToSend,
+                                     3)) {  // send command byte to DAC; MS data bits,
+                                            // DAC2; LS 8 data bits, DAC2
+      return NAN;
+    }
 
     digitalWrite(ldac, LOW);
     digitalWrite(ldac, HIGH);
@@ -69,20 +71,20 @@ DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) 
 
 
 
-  void DACChannel::setVoltageNoTransactionNoLdac(float v) {
+  bool DACChannel::setVoltageNoTransactionNoLdac(float v) {
     byte b1;
     byte b2;
     byte b3;
 
     if (v > DACLimits::upper_voltage_limit[channel_index] || v < DACLimits::lower_voltage_limit[channel_index]) {
-      return;
+      return false;
     }
 
     voltageToDecimal(v * gain_error_inverse - offset_error, &b1, &b2, &b3);
 
     byte bytesToSend[3] = {b1, b2, b3};
 
-    commsController.transferDACNoTransaction(bytesToSend,
+    return commsController.transferDACNoTransaction(bytesToSend,
                              3);  // send command byte to DAC; MS data bits,
                                   // DAC2; LS 8 data bits, DAC2
   }
@@ -131,9 +133,11 @@ DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) 
 
     byte bytesToSend[3] = {b1, b2, b3};
 
-    commsController.transferDAC(bytesToSend,
-                             3);  // send command byte to DAC; MS data bits,
-                                  // DAC2; LS 8 data bits, DAC2
+    if (!commsController.transferDAC(bytesToSend,
+                                     3)) {  // send command byte to DAC; MS data bits,
+                                            // DAC2; LS 8 data bits, DAC2
+      return NAN;
+    }
 
     digitalWrite(ldac, LOW);
 
@@ -147,9 +151,13 @@ DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) 
   float DACChannel::getVoltage() {
     byte bytesToSend[3] = {144, 0, 0};
     byte data[3]= {0, 0, 0};
-    commsController.transferDAC(bytesToSend, 3);
+    if (!commsController.transferDAC(bytesToSend, 3)) {
+      return NAN;
+    }
     // delayMicroseconds(2);
-    commsController.transferDAC(data, 3);
+    if (!commsController.transferDAC(data, 3)) {
+      return NAN;
+    }
 
     float voltage = threeByteToVoltage(data[0], data[1], data[2]);
     return gain_error * (voltage + offset_error);

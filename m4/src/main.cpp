@@ -37,6 +37,8 @@ void setup() {
 
   PeripheralCommsController::setup();
 
+  // Do not start any peripheral setup transfers until M7 has configured DMA/DMAMUX.
+  while (!isBootComplete());
 
   for (int i : dac_cs_pins) {
     DACController::addChannel(i);
@@ -51,9 +53,6 @@ void setup() {
 
   God::setup();
   God2D::setup();
-  
-  // wait for DMA initialization 
-  while (!isBootComplete());
 
   // Wait for calibration data to be sent
   while (!isCalibrationReady());
@@ -64,7 +63,7 @@ void setup() {
 
   // Set calibrations for DAC
   for (int i=0; i<NUM_DAC_CHANNELS; i++) {
-    DACController::setCalibration(i, calibrationData.offset[i], calibrationData.gain[i]);
+    DACController::applyCalibration(i, calibrationData.offset[i], calibrationData.gain[i]);
   }
 
   // Set calibrations for ADC
@@ -83,10 +82,10 @@ void setup() {
     m4SendCalibrationData(calibrationData);
   } else {
     for (int i=0; i<NUM_ADC_BOARDS * NUM_CHANNELS_PER_ADC_BOARD; i++) {
-      ADCController::setChZeroScaleCalibration(i, calibrationData.adc_offset[i]);
+      ADCController::applyChZeroScaleCalibration(i, calibrationData.adc_offset[i]);
 
       if (calibrationData.adc_gain[i] != 0) {
-        ADCController::setChFullScaleCalibration(i, calibrationData.adc_gain[i]);
+        ADCController::applyChFullScaleCalibration(i, calibrationData.adc_gain[i]);
       }
 
     }

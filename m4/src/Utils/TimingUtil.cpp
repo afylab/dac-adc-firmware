@@ -5,6 +5,15 @@
 volatile uint8_t TimingUtil::adcFlag = 0;
 volatile bool TimingUtil::dacFlag = false;
 
+namespace {
+void enableTimerClock(uint32_t clock_enable_bits) {
+  RCC->APB2ENR |= clock_enable_bits;
+  const uint32_t apb2enr = RCC->APB2ENR;
+  (void)apb2enr;
+  __DMB();
+}
+}
+
 void TimingUtil::resetTimers() {
   __disable_irq();
 
@@ -42,7 +51,7 @@ void TimingUtil::startAdcTimer() {
 void TimingUtil::setupTimerOnlyDac(uint32_t period_us) {
   resetTimers();
 
-  __HAL_RCC_TIM1_CLK_ENABLE();
+  enableTimerClock(RCC_APB2ENR_TIM1EN);
 
   uint64_t timerClock = 2 * HAL_RCC_GetPCLK2Freq();
   uint64_t total_ticks_dac = (period_us * timerClock) / 1000000;
@@ -74,7 +83,7 @@ void TimingUtil::setupTimerOnlyDac(uint32_t period_us) {
 void TimingUtil::setupTimersOnlyADC(uint32_t adc_period_us) {
   resetTimers();
 
-  __HAL_RCC_TIM8_CLK_ENABLE();
+  enableTimerClock(RCC_APB2ENR_TIM8EN);
 
   uint64_t timerClock = 2 * HAL_RCC_GetPCLK2Freq();
   uint64_t total_ticks_adc = (adc_period_us * timerClock) / 1000000;
@@ -110,8 +119,7 @@ void TimingUtil::setupTimersTimeSeries(uint32_t dac_period_us,
                                        uint32_t adc_period_us) {
   resetTimers();
 
-  __HAL_RCC_TIM1_CLK_ENABLE();
-  __HAL_RCC_TIM8_CLK_ENABLE();
+  enableTimerClock(RCC_APB2ENR_TIM1EN | RCC_APB2ENR_TIM8EN);
 
   uint64_t timerClock = 2 * HAL_RCC_GetPCLK2Freq();
   uint64_t total_ticks_dac = (dac_period_us * timerClock) / 1000000;
@@ -173,8 +181,7 @@ void TimingUtil::setupTimersDacLed(uint64_t period_us,
                                    uint64_t phase_shift_us) {
   resetTimers();
 
-  __HAL_RCC_TIM1_CLK_ENABLE();
-  __HAL_RCC_TIM8_CLK_ENABLE();
+  enableTimerClock(RCC_APB2ENR_TIM1EN | RCC_APB2ENR_TIM8EN);
 
   uint64_t timerClock = 2 * HAL_RCC_GetPCLK2Freq();
   uint64_t total_ticks = (period_us * timerClock) / 1000000;
@@ -256,6 +263,8 @@ void TimingUtil::disableAdcInterrupt() {
 extern "C" void TIM1_UP_IRQHandler(void) {
   if (TIM1->SR & TIM_SR_UIF) {
     TIM1->SR &= ~TIM_SR_UIF;
+    digitalWrite(ldac, LOW);
+    digitalWrite(ldac, HIGH);
     TimingUtil::dacFlag = true;
     __SEV();
   }
@@ -264,15 +273,23 @@ extern "C" void TIM1_UP_IRQHandler(void) {
 extern "C" void TIM8_UP_TIM13_IRQHandler(void) {
   if (TIM8->SR & TIM_SR_UIF) {
     TIM8->SR &= ~TIM_SR_UIF;
+#ifdef __NEW_DAC_ADC__
+    digitalWrite(adc_sync, HIGH);
+#else
     TimingUtil::adcFlag = true;
     __SEV();
+#endif
   }
 }
 
 extern "C" void TIM8_CC_IRQHandler(void) {
   if (TIM8->SR & TIM_SR_CC1IF) {
     TIM8->SR &= ~TIM_SR_CC1IF;
+#ifdef __NEW_DAC_ADC__
+    digitalWrite(adc_sync, HIGH);
+#else
     TimingUtil::adcFlag = true;
     __SEV();
+#endif
   }
 }

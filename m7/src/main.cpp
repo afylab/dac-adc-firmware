@@ -18,13 +18,15 @@
 #define SPI5_TX_DMA 86
 #define SPI5_RX_DMA 85
 
+constexpr uint32_t kDmaDisableTimeout = 100000;
+
 // Fallback definitions if not available in headers
 #ifndef RCC_AHB1ENR_DMAMUX1EN
 #define RCC_AHB1ENR_DMAMUX1EN (1U << 2) // Bit 2 in AHB1ENR for DMAMUX1
 #endif
 
-#ifndef RCC_APB1LENR_SPI5EN
-#define RCC_APB1LENR_SPI5EN (1U << 20) // Bit 20 in APB1LENR for SPI5
+#ifndef RCC_APB2ENR_SPI5EN
+#define RCC_APB2ENR_SPI5EN (1U << 20) // Bit 20 in APB2ENR for SPI5
 #endif
 
 #define return_if_not_ok(x) \
@@ -35,6 +37,28 @@
       return;               \
   } while (0);
 
+static bool waitForDmaStreamDisabled(DMA_Stream_TypeDef* stream) {
+  uint32_t timeout = kDmaDisableTimeout;
+  while (stream->CR & DMA_SxCR_EN) {
+    if (timeout-- == 0) {
+      return false;
+    }
+    __DMB();
+  }
+  return true;
+}
+
+static bool disableAndClearDmaStream(DMA_Stream_TypeDef* stream,
+                                     volatile uint32_t* clearRegister,
+                                     uint32_t clearMask) {
+  stream->CR &= ~DMA_SxCR_EN;
+  if (!waitForDmaStreamDisabled(stream)) {
+    return false;
+  }
+  *clearRegister = clearMask;
+  return true;
+}
+
 void initDmaForM4() {
   // Serial.println("M7: Initializing DMA for M4 core...");
   
@@ -42,10 +66,11 @@ void initDmaForM4() {
   RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
   RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN;
   SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI1EN);
-  SET_BIT(RCC->APB1LENR, RCC_APB1LENR_SPI5EN);
+  SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI5EN);
   
   // Ensure clocks are enabled
   volatile uint32_t dummy_read = RCC->AHB1ENR;
+  dummy_read = RCC->APB2ENR;
   (void)dummy_read;
   delay(1);
   
@@ -58,27 +83,33 @@ void initDmaForM4() {
   DMAMUX1_Channel3->CCR = SPI5_RX_DMA; // SPI5 RX -> DMA1 Stream 3
   
   // 4. Initialize DMA streams (basic setup, M4 will configure per-transfer)
-  // DMA1 Stream 0 (SPI1 TX)
-  DMA1_Stream0->CR &= ~DMA_SxCR_EN;
-  while(DMA1_Stream0->CR & DMA_SxCR_EN);
-  DMA1->LIFCR = 0x3F; // Clear all flags for stream 0
-  
-  // DMA1 Stream 1 (SPI1 RX) 
-  DMA1_Stream1->CR &= ~DMA_SxCR_EN;
-  while(DMA1_Stream1->CR & DMA_SxCR_EN);
-  DMA1->LIFCR = (0x3F << 6); // Clear all flags for stream 1
-  
-  // DMA1 Stream 2 (SPI5 TX)
-  DMA1_Stream2->CR &= ~DMA_SxCR_EN;
-  while(DMA1_Stream2->CR & DMA_SxCR_EN);
-  DMA1->LIFCR = (0x3F << 16); // Clear all flags for stream 2
-  
-  // DMA1 Stream 3 (SPI5 RX)
-  DMA1_Stream3->CR &= ~DMA_SxCR_EN;
-  while(DMA1_Stream3->CR & DMA_SxCR_EN);
-  DMA1->LIFCR = (0x3F << 22); // Clear all flags for stream 3
+  if (!disableAndClearDmaStream(
+          DMA1_Stream0, &DMA1->LIFCR,
+          DMA_LIFCR_CFEIF0 | DMA_LIFCR_CDMEIF0 | DMA_LIFCR_CTEIF0 |
+              DMA_LIFCR_CHTIF0 | DMA_LIFCR_CTCIF0)) {
+    return;
+  }
+  if (!disableAndClearDmaStream(
+          DMA1_Stream1, &DMA1->LIFCR,
+          DMA_LIFCR_CFEIF1 | DMA_LIFCR_CDMEIF1 | DMA_LIFCR_CTEIF1 |
+              DMA_LIFCR_CHTIF1 | DMA_LIFCR_CTCIF1)) {
+    return;
+  }
+  if (!disableAndClearDmaStream(
+          DMA1_Stream2, &DMA1->LIFCR,
+          DMA_LIFCR_CFEIF2 | DMA_LIFCR_CDMEIF2 | DMA_LIFCR_CTEIF2 |
+              DMA_LIFCR_CHTIF2 | DMA_LIFCR_CTCIF2)) {
+    return;
+  }
+  if (!disableAndClearDmaStream(
+          DMA1_Stream3, &DMA1->LIFCR,
+          DMA_LIFCR_CFEIF3 | DMA_LIFCR_CDMEIF3 | DMA_LIFCR_CTEIF3 |
+              DMA_LIFCR_CHTIF3 | DMA_LIFCR_CTCIF3)) {
+    return;
+  }
   
   // 5. Set flag in shared memory that DMA is ready
+  __DMB();
   shared_memory->isBootComplete = true; // Reuse this flag for DMA ready
   
   // Serial.println("M7: DMA initialization complete. M4 can now use DMA.");
@@ -139,8 +170,6 @@ typedef union {
 
 void setup()
 {
-  enableM4();
-
   if (!initSharedMemory())
   {
     while (1)
@@ -149,6 +178,9 @@ void setup()
       delay(1000);
     }
   }
+
+  enableM4();
+
   CalibrationData calibrationData;
   if (!readCalibrationFromFlash(calibrationData))
   {

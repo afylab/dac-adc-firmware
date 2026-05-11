@@ -34,7 +34,7 @@ class DACChannel {
 
   float setVoltage(float v);
 
-  void setVoltageNoTransactionNoLdac(float v);
+  bool setVoltageNoTransactionNoLdac(float v);
 
   void setCalibration(float offset, float gain);
 

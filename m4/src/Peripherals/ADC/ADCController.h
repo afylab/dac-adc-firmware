@@ -47,6 +47,10 @@ class ADCController {
                                                    uint32_t value);
   static OperationResult setChFullScaleCalibration(int channel_index,
                                                    uint32_t value);
+  static OperationResult applyChZeroScaleCalibration(int channel_index,
+                                                     uint32_t value);
+  static OperationResult applyChFullScaleCalibration(int channel_index,
+                                                     uint32_t value);
   static OperationResult resetToPreviousConversionTimesSerial();
   static float getDataReadyPin(int board_index);
   static uint32_t getConversionData(int adc_channel);

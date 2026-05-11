@@ -28,23 +28,28 @@ bool initSharedMemory() {
 
 void m7SendCalibrationData(const CalibrationData& data) {
   memcpy(&shared_memory->calibrationData, &data, sizeof(CalibrationData));
+  __DMB();
   shared_memory->isCalibrationReady = true;
 }
 
 void m7ReceiveCalibrationData(CalibrationData& data) {
   memcpy(&data, &shared_memory->calibrationData, sizeof(CalibrationData));
+  __DMB();
   shared_memory->isCalibrationUpdated = false;
 }
 
 bool isCalibrationUpdated() {
+  __DMB();
   return shared_memory->isCalibrationUpdated;
 }
 
 bool isBootComplete() {
+  __DMB();
   return shared_memory->isBootComplete;
 }
 
 bool isCalibrationReady() {
+  __DMB();
   return shared_memory->isCalibrationReady;
 }
 

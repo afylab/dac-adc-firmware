@@ -6,27 +6,12 @@ SharedMemory* shared_memory = nullptr;
 
 bool initSharedMemory() {
   shared_memory = reinterpret_cast<SharedMemory*>(SDRAM_START_ADDRESS);
-
-  shared_memory->m4_to_m7_char_buffer.read_index = 0;
-  shared_memory->m4_to_m7_char_buffer.write_index = 0;
-  shared_memory->m7_to_m4_char_buffer.read_index = 0;
-  shared_memory->m7_to_m4_char_buffer.write_index = 0;
-  shared_memory->m4_to_m7_float_buffer.read_index = 0;
-  shared_memory->m4_to_m7_float_buffer.write_index = 0;
-  shared_memory->m4_to_m7_voltage_buffer.read_index = 0;
-  shared_memory->m4_to_m7_voltage_buffer.write_index = 0;
-
-  shared_memory->stop_flag = false;
-
-  shared_memory->isCalibrationUpdated = false;
-  shared_memory->isBootComplete = false;
-  shared_memory->isCalibrationReady = false;
-
   return true;
 }
 
 void m4SendCalibrationData(const CalibrationData& data) {
   memcpy(&shared_memory->calibrationData, &data, sizeof(CalibrationData));
+  __DMB();
   shared_memory->isCalibrationUpdated = true;
 }
 
@@ -35,14 +20,17 @@ void m4ReceiveCalibrationData(CalibrationData& data) {
 }
 
 bool isCalibrationUpdated() {
+  __DMB();
   return shared_memory->isCalibrationUpdated;
 }
 
 bool isBootComplete() {
+  __DMB();
   return shared_memory->isBootComplete;
 }
 
 bool isCalibrationReady() {
+  __DMB();
   return shared_memory->isCalibrationReady;
 }
 

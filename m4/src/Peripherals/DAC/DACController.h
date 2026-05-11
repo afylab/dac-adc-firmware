@@ -32,11 +32,12 @@ class DACController {
   static DACChannel getChannel(int channel_index);
   static bool isChannelIndexValid(int channelIndex);
   static OperationResult setVoltage(int channel_index, float voltage);
-  static void setVoltageNoTransactionNoLdac(int channel_index, float voltage);
+  static bool setVoltageNoTransactionNoLdac(int channel_index, float voltage);
   static OperationResult toggleLdacTest();
   static void toggleLdac();
   static OperationResult getVoltage(int channel_index);
   static OperationResult setOSG(int channel_index, float offset, float gain);
+  static void applyCalibration(int channel_index, float offset, float gain);
   static void setCalibration(int channel_index, float offset, float gain);
   static CalibrationData getCalibrationData();
   static float getLowerBound(int channel);
