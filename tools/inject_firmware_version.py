@@ -1,14 +1,6 @@
-import os
+import subprocess
 Import("env")
 
-# include toolchain paths
-env.Replace(COMPILATIONDB_INCLUDE_TOOLCHAIN=True)
-
-# override compilation DB path
-env.Replace(COMPILATIONDB_PATH="compile_commands.json")
-
-# Inject latest Git commit hash as firmware version define
-import subprocess
 
 def _get_git_commit_hash():
     try:

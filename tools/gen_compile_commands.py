@@ -1,4 +1,3 @@
-import os
 Import("env")
 
 # include toolchain paths
