@@ -185,7 +185,7 @@ OperationResult validateAdcChannels(const int* channels, int count) {
       currentSlowPosition[i] = startPoint[i];
     }
 
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     uint8_t adcMask = 0u;
@@ -201,7 +201,7 @@ OperationResult validateAdcChannels(const int* channels, int count) {
     OperationResult rampResult = OperationResult::Success();
 
     // Iterate over slow steps
-    for (int slowStep = 0; slowStep < numStepsSlow && !getStopFlag(); ++slowStep) {
+    for (int slowStep = 0; slowStep < numStepsSlow && !isWorkerStopRequested(); ++slowStep) {
       // Determine ramp direction for snake mode
       bool isReverse = false;
       if (snake) {
@@ -263,14 +263,14 @@ OperationResult validateAdcChannels(const int* channels, int count) {
     PeripheralCommsController::dataLedOff();
 
     if (!rampResult.isSuccess()) {
-      if (getStopFlag()) {
-        setStopFlag(false);
+      if (isWorkerStopRequested()) {
+        clearWorkerStopRequest();
       }
       return rampResult;
     }
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       return OperationResult::Failure("2D RAMPING_STOPPED");
     }
 
@@ -425,7 +425,7 @@ OperationResult validateAdcChannels(const int* channels, int count) {
     float fastV0s[kMaxDacChannels] = {};
     float fastVfs[kMaxDacChannels] = {};
 
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     uint8_t adcMask = 0u;
@@ -441,7 +441,7 @@ OperationResult validateAdcChannels(const int* channels, int count) {
     OperationResult rampResult = OperationResult::Success();
 
     // Iterate over slow steps
-    for (int slowStep = 0; slowStep < numStepsSlow && !getStopFlag(); ++slowStep) {
+    for (int slowStep = 0; slowStep < numStepsSlow && !isWorkerStopRequested(); ++slowStep) {
       // Determine ramp direction for snake mode
       bool isReverse = false;
       if (snake) {
@@ -500,14 +500,14 @@ OperationResult validateAdcChannels(const int* channels, int count) {
     PeripheralCommsController::dataLedOff();
 
     if (!rampResult.isSuccess()) {
-      if (getStopFlag()) {
-        setStopFlag(false);
+      if (isWorkerStopRequested()) {
+        clearWorkerStopRequest();
       }
       return rampResult;
     }
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       return OperationResult::Failure("2D RAMPING_STOPPED");
     }
 

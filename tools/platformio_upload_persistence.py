@@ -21,6 +21,7 @@ CALIBRATION_UPLOAD_TIMEOUT_S = 10
 CALIBRATION_VERIFY_TIMEOUT_S = 10
 FLOAT_VERIFY_ABS_TOL = 1e-6
 ADC_CHANNEL_COUNT = 8
+MAX_DAC_CALIBRATION_RESPONSE_CHANNELS = 16
 SERIAL_PATTERN = re.compile(r"DA_2025_.{3}$")
 SERIAL_MARKER = b"__SERIAL_NUMBER__"
 SERIAL_FIELD_LENGTH = 12
@@ -236,7 +237,7 @@ def get_dac_channel_count_for_environment(environment):
     if environment == "OLD_HARDWARE":
         return 4
     if environment in ("NEW_HARDWARE", "NEW_SHIELD_OLD_DAC_ADC"):
-        return 16
+        return 8
     raise RuntimeError(f"Unknown device environment '{environment}'.")
 
 
@@ -256,13 +257,53 @@ def read_float_stream(ser, expected_count):
     return values
 
 
+def read_dac_float_stream(ser, active_dac_channel_count):
+    min_count = active_dac_channel_count * 2
+    max_count = MAX_DAC_CALIBRATION_RESPONSE_CHANNELS * 2
+    values = []
+    deadline = time.monotonic() + SERIAL_TIMEOUT_S
+
+    while len(values) < min_count:
+        line = read_line(ser, timeout=SERIAL_TIMEOUT_S)
+        for token in line.split():
+            try:
+                values.append(float(token))
+            except ValueError as exc:
+                raise RuntimeError(f"Could not parse float response '{line}'.") from exc
+        deadline = time.monotonic() + 0.2
+
+    while len(values) < max_count and time.monotonic() < deadline:
+        try:
+            line = read_line(ser, timeout=0.05)
+        except RuntimeError:
+            continue
+        for token in line.split():
+            try:
+                values.append(float(token))
+            except ValueError as exc:
+                raise RuntimeError(f"Could not parse float response '{line}'.") from exc
+        deadline = time.monotonic() + 0.2
+
+    if len(values) % 2 != 0:
+        raise RuntimeError(f"Expected offset/gain pairs, got {len(values)} values.")
+    return values
+
+
 def read_dac_calibration(ser, dac_channel_count):
     ser.reset_input_buffer()
     ser.reset_output_buffer()
     ser.write(b"INQUIRY_OSG\r\n")
     ser.flush()
-    values = read_float_stream(ser, dac_channel_count * 2)
-    return values[:dac_channel_count], values[dac_channel_count:]
+    values = read_dac_float_stream(ser, dac_channel_count)
+    response_channel_count = len(values) // 2
+    if response_channel_count < dac_channel_count:
+        raise RuntimeError(
+            f"Expected at least {dac_channel_count} DAC calibration channels, "
+            f"got {response_channel_count}."
+        )
+    offsets = values[:response_channel_count]
+    gains = values[response_channel_count:]
+    return offsets[:dac_channel_count], gains[:dac_channel_count]
 
 
 def read_adc_calibration_with_commands(ser, zero_cmd, full_cmd):
@@ -544,6 +585,10 @@ def patch_binary_serial(binary_path, serial_number):
     binary_path.write_bytes(data)
 
 
+def binary_contains_serial_marker(binary_path):
+    return SERIAL_MARKER in binary_path.read_bytes()
+
+
 def save_state(env, state):
     state_path = get_state_path(env)
     state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -620,7 +665,9 @@ def run_pre_upload(env):
                 f"Connected board environment {state['source_environment']} "
                 f"does not match selected PlatformIO environment {expected_environment}."
             )
-        binary_path = get_binary_path(env)
+
+    binary_path = get_binary_path(env)
+    if binary_contains_serial_marker(binary_path):
         patch_binary_serial(binary_path, state["serial_number"])
         log(f"Patched {binary_path.name} with serial {state['serial_number']}.")
 

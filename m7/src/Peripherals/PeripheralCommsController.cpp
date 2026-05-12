@@ -397,7 +397,7 @@ bool PeripheralCommsController::waitForDmaInit() {
   }
 
   uint32_t start_time = millis();
-  while (!isBootComplete()) {
+  while (!isWorkerDmaReady()) {
     delay(1);
     if (millis() - start_time > 3000) {
       dmaReady = false;

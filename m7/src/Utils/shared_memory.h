@@ -31,20 +31,20 @@ struct VoltageCircularBuffer {
 };
 
 struct SharedMemory {
-  CharCircularBuffer m4_to_m7_char_buffer;
-  CharCircularBuffer m7_to_m4_char_buffer;
+  CharCircularBuffer gateway_to_worker_char_buffer;
+  CharCircularBuffer worker_to_gateway_char_buffer;
 
-  FloatCircularBuffer m4_to_m7_float_buffer;
+  FloatCircularBuffer worker_to_gateway_float_buffer;
 
-  VoltageCircularBuffer m4_to_m7_voltage_buffer;
+  VoltageCircularBuffer worker_to_gateway_voltage_buffer;
 
-  volatile bool stop_flag;
+  volatile bool stop_requested;
 
-  volatile bool isCalibrationUpdated;
-  volatile bool isBootComplete;
-  volatile bool isCalibrationReady;
+  volatile bool calibration_updated;
+  volatile bool worker_dma_ready;
+  volatile bool calibration_ready;
 
-  CalibrationData calibrationData;
+  CalibrationData calibration_data;
 };
 
 constexpr uintptr_t SHARED_MEMORY_ADDRESS = 0x30040000UL;
@@ -56,23 +56,21 @@ extern SharedMemory* shared_memory;
 
 bool initSharedMemory();
 
+void publishCalibrationData(const CalibrationData& data);
+void updateCalibrationData(const CalibrationData& data);
+void readCalibrationData(CalibrationData& data);
+bool isCalibrationDataUpdated();
+void clearCalibrationDataUpdated();
+bool isWorkerDmaReady();
+bool isCalibrationDataReady();
 
-void m7SendCalibrationData(const CalibrationData& data);
-void m7ReceiveCalibrationData(CalibrationData& data);
-bool isCalibrationUpdated();
-bool isBootComplete();
-bool isCalibrationReady();
+void requestWorkerStop();
+void clearWorkerStopRequest();
+bool isWorkerStopRequested();
 
-void setStopFlag(bool value);
-bool getStopFlag();
+bool sendTextToGateway(const char* data, size_t length);
+bool receiveCommandFromGateway(char* data, size_t& length);
+bool hasCommandFromGateway();
 
-
-bool m7SendChar(const char* data, size_t length);
-bool m7ReceiveChar(char* data, size_t& length);
-bool m7HasCharMessage();
-
-bool m7ReceiveFloat(float* data, size_t& length);
-bool m7HasFloatMessage();
-
-bool m7ReceiveVoltage(double* data, size_t& length);
-bool m7HasVoltageMessage();
+bool sendFloatResponseToGateway(const float* data, size_t length);
+bool sendVoltageFrameToGateway(const double* data, size_t length);

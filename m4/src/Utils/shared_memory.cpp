@@ -1,4 +1,5 @@
 #include "shared_memory.h"
+#include <vector>
 
 SharedMemory* shared_memory = nullptr;
 
@@ -7,34 +8,7 @@ bool initSharedMemory() {
   return true;
 }
 
-void m4SendCalibrationData(const CalibrationData& data) {
-  memcpy(&shared_memory->calibrationData, &data, sizeof(CalibrationData));
-  __DMB();
-  shared_memory->isCalibrationUpdated = true;
-}
-
-void m4ReceiveCalibrationData(CalibrationData& data) {
-  memcpy(&data, &shared_memory->calibrationData, sizeof(CalibrationData));
-}
-
-bool isCalibrationUpdated() {
-  __DMB();
-  return shared_memory->isCalibrationUpdated;
-}
-
-bool isBootComplete() {
-  __DMB();
-  return shared_memory->isBootComplete;
-}
-
-bool isCalibrationReady() {
-  __DMB();
-  return shared_memory->isCalibrationReady;
-}
-
-// Set/get stop flag
-void setStopFlag(bool value) { shared_memory->stop_flag = value; }
-bool getStopFlag() { return shared_memory->stop_flag; }
+void requestWorkerStop() { shared_memory->stop_requested = true; }
 
 // ---------------------------------------------------------------------------
 //  Utilities to safely write/read a 32-bit length into the char buffer
@@ -64,8 +38,8 @@ static uint32_t readUint32FromCharBuffer(CharCircularBuffer* buffer,
 // ---------------------------------------------------------------------------
 static bool charBufferSend(CharCircularBuffer* buffer, const char* data,
                            size_t length) {
-  // NOTE: With a 256-byte ring, and a 4-byte length header, and leaving one slot empty, the true maximum payload per message is 251.
-  constexpr size_t kMaxCharPayload = (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
+  constexpr size_t kMaxCharPayload =
+      (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
   if (length > kMaxCharPayload) return false;
 
   // We need to store 4 bytes for 'length' + the actual payload
@@ -130,64 +104,10 @@ static bool charBufferHasMessage(CharCircularBuffer* buffer) {
   return (buffer->read_index != buffer->write_index);
 }
 
-static bool floatBufferSend(FloatCircularBuffer* buffer, const float* data,
-                            size_t length) {
-  // We store one extra float for 'length' and keep one slot empty to
-  // distinguish full vs empty.
-  constexpr size_t kMaxFloatPayload = (FLOAT_BUFFER_SIZE > 2) ? (FLOAT_BUFFER_SIZE - 2) : 0;
-  if (length > kMaxFloatPayload) return false;
-
-  // How many float-slots are free?
-  uint32_t available_space =
-      (buffer->read_index - buffer->write_index - 1 + FLOAT_BUFFER_SIZE) %
-      FLOAT_BUFFER_SIZE;
-
-  // We store an extra float for 'length', then the payload floats
-  if (length + 1 > available_space) return false;
-
-  uint32_t write_index = buffer->write_index;
-
-  // Store "length" as the first float
-  buffer->buffer[write_index] = static_cast<float>(length);
-  write_index = (write_index + 1) % FLOAT_BUFFER_SIZE;
-
-  // Store the payload
-  for (size_t i = 0; i < length; ++i) {
-    buffer->buffer[write_index] = data[i];
-    write_index = (write_index + 1) % FLOAT_BUFFER_SIZE;
-  }
-
-  buffer->write_index = write_index;
-  return true;
-}
-
 // ---------------------------------------------------------------------------
-//  Voltage buffer operations
+//  Gateway command/response functions
 // ---------------------------------------------------------------------------
-static bool voltageBufferSend(VoltageCircularBuffer* buffer,
-                              const double* data, size_t length) {
-  if (length > MAX_MESSAGE_SIZE) return false;
-
-  // How many double-slots are free?
-  uint32_t available_space =
-      (buffer->read_index - buffer->write_index - 1 + VOLTAGE_BUFFER_SIZE) %
-      VOLTAGE_BUFFER_SIZE;
-
-  // We do not store a "length" here; just push doubles
-  if (length > available_space) return false;
-
-  for (size_t i = 0; i < length; ++i) {
-    buffer->buffer[buffer->write_index] = data[i];
-    buffer->write_index = (buffer->write_index + 1) % VOLTAGE_BUFFER_SIZE;
-  }
-
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-//  M4 char functions
-// ---------------------------------------------------------------------------
-bool m4SendChar(const char* data, size_t length) {
+bool sendCommandToWorker(const char* data, size_t length) {
   constexpr size_t kCharFrameMaxPayload =
       (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
   constexpr size_t kNormalFrameOverhead = 1;
@@ -205,7 +125,7 @@ bool m4SendChar(const char* data, size_t length) {
 
   auto send_blocking = [&](const char* frame, size_t frame_len) -> bool {
     uint32_t start_ms = millis();
-    while (!charBufferSend(&shared_memory->m4_to_m7_char_buffer, frame,
+    while (!charBufferSend(&shared_memory->gateway_to_worker_char_buffer, frame,
                            frame_len)) {
       if (millis() - start_ms > 5000) {
         return false;
@@ -260,19 +180,187 @@ bool m4SendChar(const char* data, size_t length) {
 
   return true;
 }
-bool m4ReceiveChar(char* data, size_t& length) {
-  return charBufferReceive(&shared_memory->m7_to_m4_char_buffer, data, length);
+bool receiveTextFromWorker(char* data, size_t& length) {
+  struct CharReassemblyState {
+    bool assembling = false;
+    uint16_t next_seq = 0;
+    uint32_t expected_total = 0;
+    std::vector<char> assembled;
+  };
+  static CharReassemblyState state;
+
+  const size_t output_capacity = length;
+  char frame[CHAR_BUFFER_SIZE];
+  size_t frame_length = sizeof(frame);
+  if (!charBufferReceive(&shared_memory->worker_to_gateway_char_buffer, frame,
+                         frame_length)) {
+    return false;
+  }
+
+  auto read_le16 = [](const uint8_t* p) -> uint16_t {
+    return static_cast<uint16_t>(p[0]) |
+           (static_cast<uint16_t>(p[1]) << 8);
+  };
+  auto read_le32 = [](const uint8_t* p) -> uint32_t {
+    return static_cast<uint32_t>(p[0]) |
+           (static_cast<uint32_t>(p[1]) << 8) |
+           (static_cast<uint32_t>(p[2]) << 16) |
+           (static_cast<uint32_t>(p[3]) << 24);
+  };
+
+  const uint8_t* u8 = reinterpret_cast<const uint8_t*>(frame);
+  if (frame_length == 0) {
+    length = 0;
+    return false;
+  }
+
+  const uint8_t frame_type = u8[0];
+  if (frame_type == CHAR_FRAME_TYPE_NORMAL) {
+    const size_t payload_length = frame_length - 1;
+    if (payload_length > output_capacity) {
+      length = 0;
+      return false;
+    }
+
+    state = CharReassemblyState{};
+    memcpy(data, frame + 1, payload_length);
+    length = payload_length;
+    return true;
+  }
+
+  if (frame_type != CHAR_FRAME_TYPE_FRAGMENT ||
+      frame_length < CHAR_FRAGMENT_HEADER_SIZE) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  const uint8_t flags = u8[1];
+  const uint8_t version = u8[2];
+  const uint16_t seq = read_le16(&u8[3]);
+  const uint32_t total_len = read_le32(&u8[5]);
+  const bool is_first = (flags & 0x01) != 0;
+  const bool is_last = (flags & 0x02) != 0;
+
+  if (version != CHAR_FRAGMENT_VERSION || total_len == 0) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  if (is_first) {
+    state.assembling = true;
+    state.next_seq = 0;
+    state.expected_total = total_len;
+    state.assembled.clear();
+    state.assembled.reserve(total_len);
+  }
+
+  if (!state.assembling || seq != state.next_seq ||
+      total_len != state.expected_total) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  const size_t payload_len =
+      (frame_length > CHAR_FRAGMENT_HEADER_SIZE)
+          ? (frame_length - CHAR_FRAGMENT_HEADER_SIZE)
+          : 0;
+  const size_t already = state.assembled.size();
+  if (payload_len > 0 && already < state.expected_total) {
+    const size_t remaining = state.expected_total - already;
+    const size_t to_append =
+        (payload_len < remaining) ? payload_len : remaining;
+    state.assembled.insert(state.assembled.end(),
+                           frame + CHAR_FRAGMENT_HEADER_SIZE,
+                           frame + CHAR_FRAGMENT_HEADER_SIZE + to_append);
+  }
+
+  state.next_seq++;
+
+  if (!(is_last && state.assembled.size() >= state.expected_total)) {
+    length = 0;
+    return false;
+  }
+
+  if (state.expected_total > output_capacity) {
+    state = CharReassemblyState{};
+    length = 0;
+    return false;
+  }
+
+  memcpy(data, state.assembled.data(), state.expected_total);
+  length = state.expected_total;
+  state = CharReassemblyState{};
+  return true;
 }
-bool m4HasCharMessage() {
-  return charBufferHasMessage(&shared_memory->m7_to_m4_char_buffer);
+bool hasTextFromWorker() {
+  return charBufferHasMessage(&shared_memory->worker_to_gateway_char_buffer);
 }
 
-// M4 float functions
-bool m4SendFloat(const float* data, size_t length) {
-  return floatBufferSend(&shared_memory->m4_to_m7_float_buffer, data, length);
+static bool floatBufferReceive(FloatCircularBuffer* buffer, float* data,
+                               size_t& length) {
+  if (buffer->read_index == buffer->write_index) {
+    length = 0;
+    return false;
+  }
+
+  uint32_t read_index = buffer->read_index;
+  float msg_length_f = buffer->buffer[read_index];
+  uint32_t msg_length = static_cast<uint32_t>(msg_length_f);
+  read_index = (read_index + 1) % FLOAT_BUFFER_SIZE;
+
+  if (msg_length > length) {
+    length = msg_length;
+    return false;
+  }
+
+  for (size_t i = 0; i < msg_length; i++) {
+    data[i] = buffer->buffer[read_index];
+    read_index = (read_index + 1) % FLOAT_BUFFER_SIZE;
+  }
+
+  buffer->read_index = read_index;
+  length = msg_length;
+  return true;
 }
 
-// M4 voltage functions
-bool m4SendVoltage(const double* data, size_t length) {
-  return voltageBufferSend(&shared_memory->m4_to_m7_voltage_buffer, data, length);
+bool receiveFloatResponseFromWorker(float* data, size_t& length) {
+  return floatBufferReceive(&shared_memory->worker_to_gateway_float_buffer, data,
+                            length);
+}
+bool hasFloatResponseFromWorker() {
+  return shared_memory->worker_to_gateway_float_buffer.read_index !=
+         shared_memory->worker_to_gateway_float_buffer.write_index;
+}
+
+static bool voltageBufferReceive(VoltageCircularBuffer* buffer,
+                                 double* data, size_t& length) {
+  if (buffer->read_index == buffer->write_index) {
+    length = 0;
+    return false;
+  }
+
+  size_t available =
+      (buffer->write_index - buffer->read_index + VOLTAGE_BUFFER_SIZE) %
+      VOLTAGE_BUFFER_SIZE;
+  size_t to_read = (length < available) ? length : available;
+
+  for (size_t i = 0; i < to_read; ++i) {
+    data[i] = buffer->buffer[buffer->read_index];
+    buffer->read_index = (buffer->read_index + 1) % VOLTAGE_BUFFER_SIZE;
+  }
+
+  length = to_read;
+  return true;
+}
+
+bool receiveVoltageFrameFromWorker(double* data, size_t& length) {
+  return voltageBufferReceive(&shared_memory->worker_to_gateway_voltage_buffer,
+                              data, length);
+}
+bool hasVoltageFrameFromWorker() {
+  return shared_memory->worker_to_gateway_voltage_buffer.read_index !=
+         shared_memory->worker_to_gateway_voltage_buffer.write_index;
 }

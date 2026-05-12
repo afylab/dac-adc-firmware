@@ -162,7 +162,7 @@ OperationResult ADCController::getSavedChZeroScaleCalibration(
   }
 
   CalibrationData data;
-  m4ReceiveCalibrationData(data);
+  readCalibrationData(data);
   return OperationResult::Success(String(data.adc_offset[channel_index]));
 }
 
@@ -173,7 +173,7 @@ OperationResult ADCController::getSavedChFullScaleCalibration(
   }
 
   CalibrationData data;
-  m4ReceiveCalibrationData(data);
+  readCalibrationData(data);
   return OperationResult::Success(String(data.adc_gain[channel_index]));
 }
 
@@ -184,9 +184,9 @@ OperationResult ADCController::setSavedChZeroScaleCalibration(
   }
 
   CalibrationData data;
-  m4ReceiveCalibrationData(data);
+  readCalibrationData(data);
   data.adc_offset[channel_index] = value;
-  m4SendCalibrationData(data);
+  updateCalibrationData(data);
   return OperationResult::Success("Saved zero scale calibration");
 }
 
@@ -197,9 +197,9 @@ OperationResult ADCController::setSavedChFullScaleCalibration(
   }
 
   CalibrationData data;
-  m4ReceiveCalibrationData(data);
+  readCalibrationData(data);
   data.adc_gain[channel_index] = value;
-  m4SendCalibrationData(data);
+  updateCalibrationData(data);
   return OperationResult::Success("Saved full scale calibration");
 }
 
@@ -351,9 +351,9 @@ OperationResult ADCController::hardResetAllADCBoards() {
   }
 
   CalibrationData data;
-  m4ReceiveCalibrationData(data);
+  readCalibrationData(data);
   data.adcCalibrated = false;
-  m4SendCalibrationData(data);
+  updateCalibrationData(data);
 
   return OperationResult::Success("All ADC boards have been hard reset");
 }

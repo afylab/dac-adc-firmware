@@ -356,12 +356,12 @@
 
 
   void ADCBoard::restoreCalibrationFromFlash() {
-    if (!isCalibrationReady()) {
+    if (!isCalibrationDataReady()) {
       return;
     }
 
     CalibrationData data;
-    m4ReceiveCalibrationData(data);
+    readCalibrationData(data);
 
     if (!data.adcCalibrated) {
       return;
@@ -565,9 +565,9 @@
     uint32_t zeroScaleCalibration = getZeroScaleCalibration(channel);
 
     CalibrationData calibrationData;
-    m4ReceiveCalibrationData(calibrationData);
+    readCalibrationData(calibrationData);
     calibrationData.adc_offset[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + channel] = zeroScaleCalibration;
-    m4SendCalibrationData(calibrationData);
+    updateCalibrationData(calibrationData);
     
   }
 
@@ -589,7 +589,7 @@
     uint32_t fullScaleCalibration = getFullScaleCalibration(channel);
 
     CalibrationData calibrationData;
-    m4ReceiveCalibrationData(calibrationData);
+    readCalibrationData(calibrationData);
     calibrationData.adc_gain[NUM_CHANNELS_PER_ADC_BOARD * boardIndex + channel] = fullScaleCalibration;
-    m4SendCalibrationData(calibrationData);
+    updateCalibrationData(calibrationData);
   }

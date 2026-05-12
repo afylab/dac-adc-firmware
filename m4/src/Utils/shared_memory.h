@@ -31,20 +31,20 @@ struct VoltageCircularBuffer {
 };
 
 struct SharedMemory {
-  CharCircularBuffer m4_to_m7_char_buffer;
-  CharCircularBuffer m7_to_m4_char_buffer;
+  CharCircularBuffer gateway_to_worker_char_buffer;
+  CharCircularBuffer worker_to_gateway_char_buffer;
 
-  FloatCircularBuffer m4_to_m7_float_buffer;
+  FloatCircularBuffer worker_to_gateway_float_buffer;
 
-  VoltageCircularBuffer m4_to_m7_voltage_buffer;
+  VoltageCircularBuffer worker_to_gateway_voltage_buffer;
 
-  volatile bool stop_flag;
+  volatile bool stop_requested;
 
-  volatile bool isCalibrationUpdated;
-  volatile bool isBootComplete;
-  volatile bool isCalibrationReady;
+  volatile bool calibration_updated;
+  volatile bool worker_dma_ready;
+  volatile bool calibration_ready;
 
-  CalibrationData calibrationData;
+  CalibrationData calibration_data;
 };
 
 constexpr uintptr_t SHARED_MEMORY_ADDRESS = 0x10040000UL;
@@ -56,21 +56,14 @@ extern SharedMemory* shared_memory;
 
 bool initSharedMemory();
 
+void requestWorkerStop();
 
-void m4SendCalibrationData(const CalibrationData& data);
-void m4ReceiveCalibrationData(CalibrationData& data);
-bool isCalibrationUpdated();
-bool isBootComplete();
-bool isCalibrationReady();
+bool sendCommandToWorker(const char* data, size_t length);
+bool receiveTextFromWorker(char* data, size_t& length);
+bool hasTextFromWorker();
 
+bool receiveFloatResponseFromWorker(float* data, size_t& length);
+bool hasFloatResponseFromWorker();
 
-void setStopFlag(bool value);
-bool getStopFlag();
-
-bool m4SendChar(const char* data, size_t length);
-bool m4ReceiveChar(char* data, size_t& length);
-bool m4HasCharMessage();
-
-bool m4SendFloat(const float* data, size_t length);
-
-bool m4SendVoltage(const double* data, size_t length);
+bool receiveVoltageFrameFromWorker(double* data, size_t& length);
+bool hasVoltageFrameFromWorker();

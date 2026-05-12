@@ -34,9 +34,8 @@ bool writeCalibrationToFlash(const CalibrationData &data) {
   QSPIFBlockDevice qspi(QSPI_SO0, QSPI_SO1, QSPI_SO2, QSPI_SO3, QSPI_SCK, QSPI_CS,
                         QSPIF_POLARITY_MODE_1, 40000000);
 
-  int err = qspi.init();
-  if (err != 0) {
-    Serial.println("FAILURE: QSPI flash init failed");
+  int qspi_status = qspi.init();
+  if (qspi_status != 0) {
     return false;
   }
 
@@ -52,16 +51,14 @@ bool writeCalibrationToFlash(const CalibrationData &data) {
 
   size_t eraseSize = qspi.get_erase_size(CALIBRATION_FLASH_ADDR);
   uint32_t alignedAddr = CALIBRATION_FLASH_ADDR - (CALIBRATION_FLASH_ADDR % eraseSize);
-  err = qspi.erase(alignedAddr, eraseSize);
-  if (err != 0) {
-    Serial.println("FAILURE: QSPI flash erase failed");
+  qspi_status = qspi.erase(alignedAddr, eraseSize);
+  if (qspi_status != 0) {
     qspi.deinit();
     return false;
   }
 
-  err = qspi.program(writeBuf, CALIBRATION_FLASH_ADDR, totalSize);
-  if (err != 0) {
-    Serial.println("FAILURE: QSPI flash program failed");
+  qspi_status = qspi.program(writeBuf, CALIBRATION_FLASH_ADDR, totalSize);
+  if (qspi_status != 0) {
     qspi.deinit();
     return false;
   }
@@ -74,18 +71,16 @@ bool readCalibrationFromFlash(CalibrationData &data) {
   QSPIFBlockDevice qspi(QSPI_SO0, QSPI_SO1, QSPI_SO2, QSPI_SO3, QSPI_SCK, QSPI_CS,
                         QSPIF_POLARITY_MODE_1, 40000000);
 
-  int err = qspi.init();
-  if (err != 0) {
-    Serial.println("FAILURE: QSPI flash init failed");
+  int qspi_status = qspi.init();
+  if (qspi_status != 0) {
     return false;
   }
 
   const size_t totalSize = sizeof(CalibrationData) + sizeof(uint32_t);
   uint8_t readBuf[totalSize];
 
-  err = qspi.read(readBuf, CALIBRATION_FLASH_ADDR, totalSize);
-  if (err != 0) {
-    Serial.println("FAILURE: QSPI flash read failed");
+  qspi_status = qspi.read(readBuf, CALIBRATION_FLASH_ADDR, totalSize);
+  if (qspi_status != 0) {
     qspi.deinit();
     return false;
   }
@@ -98,7 +93,6 @@ bool readCalibrationFromFlash(CalibrationData &data) {
 
   uint32_t calcCrc = calculateCRC32(rawData, sizeof(CalibrationData));
   if (calcCrc != storedCrc) {
-    Serial.println("FAILURE: Calibration data CRC mismatch (data is corrupted or not written)");
     qspi.deinit();
     return false;
   }

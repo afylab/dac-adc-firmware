@@ -185,12 +185,12 @@ void DACController::setCalibration(int channel_index, float offset, float gain) 
 
   applyCalibration(channel_index, offset, gain);
   CalibrationData calibrationData = getCalibrationData();
-  m4SendCalibrationData(calibrationData);
+  updateCalibrationData(calibrationData);
 }
 
 CalibrationData DACController::getCalibrationData() {
   CalibrationData calibrationData;
-  m4ReceiveCalibrationData(calibrationData);
+  readCalibrationData(calibrationData);
   for (int i = 0; i < NUM_DAC_CHANNELS; i++) {
     calibrationData.offset[i] = dac_channels[i].getOffsetError();
     calibrationData.gain[i] = dac_channels[i].getGainError();
@@ -238,11 +238,11 @@ OperationResult DACController::inquiryOSG() {
   String output = "";
   for (auto& channel : dac_channels) {
     float offset = channel.getOffsetError();
-    m4SendFloat(&offset, 1);
+    sendFloatResponseToGateway(&offset, 1);
   }
   for (auto& channel : dac_channels) {
     float gain = channel.getGainError();
-    m4SendFloat(&gain, 1);
+    sendFloatResponseToGateway(&gain, 1);
   }
   return OperationResult::Success(output);
 }
@@ -319,7 +319,7 @@ OperationResult DACController::autoRampN(const std::vector<float>& args) {
   }
 
   while (currentStep < numSteps) {
-    if (getStopFlag()) {
+    if (isWorkerStopRequested()) {
       break;
     }
     if (TimingUtil::dacFlag) {
@@ -343,8 +343,8 @@ OperationResult DACController::autoRampN(const std::vector<float>& args) {
   }
   output += "IN " + String(numSteps) + " STEPS";
 
-  if (getStopFlag()) {
-    setStopFlag(false);
+  if (isWorkerStopRequested()) {
+    clearWorkerStopRequest();
     return OperationResult::Failure("RAMPING_STOPPED");
   }
 

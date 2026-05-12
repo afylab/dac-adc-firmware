@@ -90,10 +90,10 @@ OperationResult validateAdcChannels(const int* channels, int count) {
 }
 
 bool sendVoltageFrame(const double* packets, size_t length) {
-  if (m4SendVoltage(packets, length)) {
+  if (sendVoltageFrameToGateway(packets, length)) {
     return true;
   }
-  setStopFlag(true);
+  requestWorkerStop();
   return false;
 }
 }
@@ -128,7 +128,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
   OperationResult God::hardResetCalibrationToDefaults() {
     CalibrationData calibrationData;
-    m4ReceiveCalibrationData(calibrationData);
+    readCalibrationData(calibrationData);
     for (int i = 0; i < NUM_DAC_CHANNELS; i++) {
       calibrationData.gain[i] = 1.0f;
       calibrationData.offset[i] = 0.0f;
@@ -136,7 +136,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       calibrationData.adc_gain[i] = 0x200000; // Default ADC gain
     }
     calibrationData.adcCalibrated = false;
-    m4SendCalibrationData(calibrationData);
+    updateCalibrationData(calibrationData);
 
     return OperationResult::Success("Calibration data reset to defaults");
   }
@@ -233,12 +233,12 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     // Send the number of bytes to expect before starting the ADC read
     if (!sendVoltageFrame(&sample_rate_float, 1)) {
-      setStopFlag(false);
+      clearWorkerStopRequest();
       return OperationResult::Failure("Voltage output buffer overflow");
     }
 
     // Toggle stop flag and turn on data LED
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     #ifdef __NEW_DAC_ADC__
@@ -274,7 +274,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     bool voltageOverflow = false;
 
     //Begin main loop
-    while (x < saved_data_size && !getStopFlag()) {
+    while (x < saved_data_size && !isWorkerStopRequested()) {
       __WFE(); // Wait for event (WFE) to reduce CPU usage
       if (TimingUtil::adcFlag == adcMask) {
         double packets[kMaxAdcChannels] = {};
@@ -317,8 +317,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     PeripheralCommsController::dataLedOff();
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       if (voltageOverflow) {
         return OperationResult::Failure("Voltage output buffer overflow");
       }
@@ -415,7 +415,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     uint8_t adcMask = 0u;
     BoardUsage boardUsage{0, std::vector<uint8_t>()};
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     OperationResult prepareResult = prepareTimeSeriesBufferRampHardware(
@@ -434,14 +434,14 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     PeripheralCommsController::dataLedOff();
 
     if (!rampResult.isSuccess()) {
-      if (getStopFlag()) {
-        setStopFlag(false);
+      if (isWorkerStopRequested()) {
+        clearWorkerStopRequest();
       }
       return rampResult;
     }
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       return OperationResult::Failure("RAMPING_STOPPED");
     }
 
@@ -560,7 +560,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     TimingUtil::dacFlag = false;
     TimingUtil::adcFlag = 0;
 
-    while ((x < saved_data_size || steps < numSteps) && !getStopFlag()) {
+    while ((x < saved_data_size || steps < numSteps) && !isWorkerStopRequested()) {
       __WFE();
       if (TimingUtil::dacFlag && steps < numSteps) {
         if (steps < numSteps - 1) {
@@ -595,7 +595,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       }
     }
 
-    if (getStopFlag()) {
+    if (isWorkerStopRequested()) {
       if (voltageOverflow) {
         return OperationResult::Failure("Voltage output buffer overflow");
       }
@@ -723,7 +723,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     uint8_t adcMask = 0u;
     BoardUsage boardUsage{0, std::vector<uint8_t>()};
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     OperationResult prepareResult = prepareDacLedBufferRampHardware(
@@ -742,14 +742,14 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     PeripheralCommsController::dataLedOff();
 
     if (!rampResult.isSuccess()) {
-      if (getStopFlag()) {
-        setStopFlag(false);
+      if (isWorkerStopRequested()) {
+        clearWorkerStopRequest();
       }
       return rampResult;
     }
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       return OperationResult::Failure("RAMPING_STOPPED");
     }
 
@@ -771,25 +771,6 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     digitalWrite(adc_sync, LOW);
 
     boardUsage = getUsedBoards(adcChannels, numAdcChannels);
-
-    float convTimeSum[4] = {0.0, 0.0, 0.0, 0.0};
-    for (int i = 0; i < numAdcChannels; i++) {
-      int chNum = adcChannels[i];
-      uint8_t board_num = chNum / 4;
-      convTimeSum[board_num] += ADCController::getConversionTimeFloat(chNum);
-    }
-    float maxConvTime =
-        *std::max_element(std::begin(convTimeSum), std::end(convTimeSum));
-    // if (maxConvTime * numAdcAverages + dac_settling_time_us + 180 >=
-    //     dac_interval_us) {
-    //   return OperationResult::Failure(
-    //       "DAC Interval is too short for specified ADC conversion time, please increase it");
-    // }
-
-    // if (dac_settling_time_us < 100) {
-    //   return OperationResult::Failure(
-    //       "DAC settling time is too short, please increase it");
-    // }
 
     attachAdcSyncInterrupts(boardUsage);
     adcMask = adcMaskForBoardUsage(boardUsage);
@@ -850,7 +831,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     int x = 0;
     bool voltageOverflow = false;
 
-    while (x < numSteps && !getStopFlag()) {
+    while (x < numSteps && !isWorkerStopRequested()) {
       __WFE();
 
       if (TimingUtil::dacFlag && dacIncrements < numSteps) {
@@ -896,7 +877,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       }
     }
 
-    if (getStopFlag()) {
+    if (isWorkerStopRequested()) {
       if (voltageOverflow) {
         return OperationResult::Failure("Voltage output buffer overflow");
       }
@@ -1089,7 +1070,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       double packets[kMaxAdcChannels] = {};
       double numAdcAveragesInv = 1.0 / static_cast<double>(numAdcAverages);
   
-      setStopFlag(false);
+      clearWorkerStopRequest();
       PeripheralCommsController::dataLedOn();
   
       ADCController::resetToPreviousConversionTimes();
@@ -1164,7 +1145,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       int subIndex = 0;
   
       // Main event loop using interrupt-based timing
-      while (currentLoop < numLoops && !getStopFlag()) {
+      while (currentLoop < numLoops && !isWorkerStopRequested()) {
         __WFE(); // Wait for event (interrupt)
         
         // Handle DAC flag - time to set next DAC voltage
@@ -1244,8 +1225,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       ADCController::resetToPreviousConversionTimes();
       PeripheralCommsController::dataLedOff();
   
-      if (getStopFlag()) {
-        setStopFlag(false);
+      if (isWorkerStopRequested()) {
+        clearWorkerStopRequest();
         if (voltageOverflow) {
           return OperationResult::Failure("Voltage output buffer overflow");
         }
@@ -1335,7 +1316,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       }
     }
 
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     // Apply initial step immediately; first LDAC edge will latch these values.
@@ -1349,7 +1330,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     // Run continuously (repeat waveform) until STOP is requested.
     int step = 1; // step 0 already written
-    while (!getStopFlag()) {
+    while (!isWorkerStopRequested()) {
       __WFE();
       if (TimingUtil::dacFlag) {
         for (int i = 0; i < numDacChannels; i++) {
@@ -1369,8 +1350,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     TimingUtil::dacFlag = false;
     PeripheralCommsController::dataLedOff();
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       return OperationResult::Failure("RAMPING_STOPPED");
     }
     return OperationResult::Success();
@@ -1477,7 +1458,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       attachAdcSyncInterrupts(boardUsage);
       #endif
 
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
     ADCController::resetToPreviousConversionTimes();
 
@@ -1511,9 +1492,9 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     TimingUtil::adcFlag = 0;
 
     // Main loop: for each cycle, for each step, set DAC and read ADC
-    for (int cycle = 0; cycle < numCycles && !getStopFlag(); cycle++) {
+    for (int cycle = 0; cycle < numCycles && !isWorkerStopRequested(); cycle++) {
       int step = 0;
-      while (step < numSteps && !getStopFlag()) {
+      while (step < numSteps && !isWorkerStopRequested()) {
         // Wait for timer flag
         __WFE();
         if (TimingUtil::dacFlag) {
@@ -1571,8 +1552,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     ADCController::resetToPreviousConversionTimes();
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       if (voltageOverflow) {
         return OperationResult::Failure("Voltage output buffer overflow");
       }
@@ -1622,7 +1603,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     double packets[kMaxAdcChannels] = {};
     double numAdcAveragesInv = 1.0 / static_cast<double>(numAdcAverages);
 
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     ADCController::resetToPreviousConversionTimes();
@@ -1682,7 +1663,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     bool done = false;
 
     // Main event loop using interrupt-based timing
-    while (currentLoop < numLoops && !getStopFlag()) {
+    while (currentLoop < numLoops && !isWorkerStopRequested()) {
       __WFE(); // Wait for event (interrupt)
       
       // Handle DAC flag - time to set next DAC voltage
@@ -1748,8 +1729,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     ADCController::resetToPreviousConversionTimes();
     PeripheralCommsController::dataLedOff();
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       if (voltageOverflow) {
         return OperationResult::Failure("Voltage output buffer overflow");
       }
@@ -1784,7 +1765,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       calibrationData.offset[i] = offsetError;
       calibrationData.gain[i] = gainError;
     }
-    m4SendCalibrationData(calibrationData);
+    updateCalibrationData(calibrationData);
     return OperationResult::Success("CALIBRATION_FINISHED");
   }
 
@@ -1903,7 +1884,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       }
     }
 
-    setStopFlag(false);
+    clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
 
     double voltageStepSizeLow[kMaxDacChannels] = {};
@@ -1973,7 +1954,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     TimingUtil::setupTimersTimeSeries(dacPeriod_us, actualConversionTime_us);
 
-    while (x < total_data_size && !getStopFlag()) {
+    while (x < total_data_size && !isWorkerStopRequested()) {
       if (TimingUtil::adcFlag == adcMask) {
         if (adcGetsSinceLastDacSet >= numAdcConversionSkips) {
           double packets[kMaxAdcChannels] = {};
@@ -2033,8 +2014,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     PeripheralCommsController::dataLedOff();
 
-    if (getStopFlag()) {
-      setStopFlag(false);
+    if (isWorkerStopRequested()) {
+      clearWorkerStopRequest();
       if (voltageOverflow) {
         return OperationResult::Failure("Voltage output buffer overflow");
       }

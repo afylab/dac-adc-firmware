@@ -1,37 +1,40 @@
 #include <Arduino.h>
 
-#include "Utils/shared_memory.h"
+#include "Config.h"
+#include "Peripherals/ADC/ADCController.h"
+#include "Peripherals/DAC/DACController.h"
+#include "Peripherals/God.h"
+#include "Peripherals/God2D.h"
+#include "Peripherals/PeripheralCommsController.h"
+#include "UserIOHandler.h"
 #include "Utils/flash.h"
+#include "Utils/shared_memory.h"
 
-#define NUM_DAC_CHANNELS 16
-
-// Add STM32H7 register access for M7 DMA initialization
 #if defined(ARDUINO_GIGA) || defined(CORE_STM32H7)
 #include "stm32h7xx.h"
 #else
 #error "This code is intended for STM32H7 based boards like Arduino Giga."
 #endif
 
-// DMAMUX Request IDs for SPI
 #define SPI1_TX_DMA 38
 #define SPI1_RX_DMA 37
 #define SPI5_TX_DMA 86
 #define SPI5_RX_DMA 85
 
 constexpr uint32_t kDmaDisableTimeout = 100000;
+constexpr char kFlashWriteFailure[] =
+    "Failed to write calibration data to flash!";
 
-// Fallback definitions if not available in headers
 #ifndef RCC_AHB1ENR_DMAMUX1EN
-#define RCC_AHB1ENR_DMAMUX1EN (1U << 2) // Bit 2 in AHB1ENR for DMAMUX1
+#define RCC_AHB1ENR_DMAMUX1EN (1U << 2)
 #endif
 
 #ifndef RCC_APB2ENR_SPI5EN
-#define RCC_APB2ENR_SPI5EN (1U << 20) // Bit 20 in APB2ENR for SPI5
+#define RCC_APB2ENR_SPI5EN (1U << 20)
 #endif
 
 #define return_if_not_ok(x) \
-  do                        \
-  {                         \
+  do {                      \
     int ret = x;            \
     if (ret != HAL_OK)      \
       return;               \
@@ -59,30 +62,22 @@ static bool disableAndClearDmaStream(DMA_Stream_TypeDef* stream,
   return true;
 }
 
-void initDmaForM4() {
-  // Serial.println("M7: Initializing DMA for M4 core...");
-  
-  // 1. Enable Clocks for DMA, DMAMUX, SPI1, SPI5
+void initDmaForWorker() {
   RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
   RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN;
   SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI1EN);
   SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI5EN);
-  
-  // Ensure clocks are enabled
+
   volatile uint32_t dummy_read = RCC->AHB1ENR;
   dummy_read = RCC->APB2ENR;
   (void)dummy_read;
   delay(1);
-  
-  // 2. Configure DMAMUX for SPI1 (DAC)
-  DMAMUX1_Channel0->CCR = SPI1_TX_DMA; // SPI1 TX -> DMA1 Stream 0
-  DMAMUX1_Channel1->CCR = SPI1_RX_DMA; // SPI1 RX -> DMA1 Stream 1
-  
-  // 3. Configure DMAMUX for SPI5 (ADC on new shield)
-  DMAMUX1_Channel2->CCR = SPI5_TX_DMA; // SPI5 TX -> DMA1 Stream 2  
-  DMAMUX1_Channel3->CCR = SPI5_RX_DMA; // SPI5 RX -> DMA1 Stream 3
-  
-  // 4. Initialize DMA streams (basic setup, M4 will configure per-transfer)
+
+  DMAMUX1_Channel0->CCR = SPI1_TX_DMA;
+  DMAMUX1_Channel1->CCR = SPI1_RX_DMA;
+  DMAMUX1_Channel2->CCR = SPI5_TX_DMA;
+  DMAMUX1_Channel3->CCR = SPI5_RX_DMA;
+
   if (!disableAndClearDmaStream(
           DMA1_Stream0, &DMA1->LIFCR,
           DMA_LIFCR_CFEIF0 | DMA_LIFCR_CDMEIF0 | DMA_LIFCR_CTEIF0 |
@@ -107,19 +102,14 @@ void initDmaForM4() {
               DMA_LIFCR_CHTIF3 | DMA_LIFCR_CTCIF3)) {
     return;
   }
-  
-  // 5. Set flag in shared memory that DMA is ready
+
   __DMB();
-  shared_memory->isBootComplete = true; // Reuse this flag for DMA ready
-  
-  // Serial.println("M7: DMA initialization complete. M4 can now use DMA.");
+  shared_memory->worker_dma_ready = true;
 }
 
-static void configureSharedMemoryMpu()
-{
+static void configureSharedMemoryMpu() {
   HAL_MPU_Disable();
 
-  // Disable caching for the shared memory region.
   MPU_Region_InitTypeDef MPU_InitStruct;
   MPU_InitStruct.Enable = MPU_REGION_ENABLE;
   MPU_InitStruct.BaseAddress = SHARED_MEMORY_ADDRESS;
@@ -134,21 +124,45 @@ static void configureSharedMemoryMpu()
   MPU_InitStruct.DisableExec = MPU_INSTRUCTION_ACCESS_ENABLE;
   HAL_MPU_ConfigRegion(&MPU_InitStruct);
 
-  // Enable the MPU
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
   __DSB();
   __ISB();
 }
 
-void enableM4()
-{
-  // If CM4 is already booted, disable auto-boot and reset.
+static void prepareM4UsbClock() {
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_RCC_SYSCFG_CLK_ENABLE();
+  __HAL_RCC_HSI48_ENABLE();
+  __HAL_RCC_CRS_CLK_ENABLE();
+
+  uint32_t start = HAL_GetTick();
+  while (__HAL_RCC_GET_FLAG(RCC_FLAG_HSI48RDY) == RESET &&
+         (HAL_GetTick() - start) < 10) {
+  }
+
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {};
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_USB;
+  PeriphClkInitStruct.UsbClockSelection = RCC_USBCLKSOURCE_HSI48;
+  (void)HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct);
+
+  RCC_CRSInitTypeDef CRSInitStruct = {};
+  CRSInitStruct.Prescaler = RCC_CRS_SYNC_DIV1;
+  CRSInitStruct.Source = RCC_CRS_SYNC_SOURCE_USB2;
+  CRSInitStruct.Polarity = RCC_CRS_SYNC_POLARITY_RISING;
+  CRSInitStruct.ReloadValue = RCC_CRS_RELOADVALUE_DEFAULT;
+  CRSInitStruct.ErrorLimitValue = RCC_CRS_ERRORLIMIT_DEFAULT;
+  CRSInitStruct.HSI48CalibrationValue = RCC_CRS_HSI48CALIBRATION_DEFAULT;
+  HAL_RCCEx_CRSConfig(&CRSInitStruct);
+
+  HAL_PWREx_EnableUSBVoltageDetector();
+}
+
+void enableM4() {
   FLASH_OBProgramInitTypeDef OBInit;
 
   OBInit.Banks = FLASH_BANK_1;
   HAL_FLASHEx_OBGetConfig(&OBInit);
-  if (OBInit.USERConfig & FLASH_OPTSR_BCM4)
-  {
+  if (OBInit.USERConfig & FLASH_OPTSR_BCM4) {
     OBInit.OptionType = OPTIONBYTE_USER;
     OBInit.USERType = OB_USER_BCM4;
     OBInit.USERConfig = 0;
@@ -158,152 +172,126 @@ void enableM4()
     return_if_not_ok(HAL_FLASH_OB_Launch());
     return_if_not_ok(HAL_FLASH_OB_Lock());
     return_if_not_ok(HAL_FLASH_Lock());
-    printf("CM4 autoboot disabled\n");
     NVIC_SystemReset();
     return;
   }
 
-  // Classic boot, just set the address and we are ready to go
+  prepareM4UsbClock();
+
   LL_SYSCFG_SetCM4BootAddress0(CM4_BINARY_START >> 16);
   LL_RCC_ForceCM4Boot();
 }
 
-typedef union {
-  float floatingPoint;
-  byte binary[4];
-} binaryFloat;
+static CalibrationData loadCalibrationData() {
+  CalibrationData calibration_data;
+  if (!readCalibrationFromFlash(calibration_data)) {
+    for (size_t i = 0; i < NUM_DAC_CHANNELS; ++i) {
+      calibration_data.gain[i] = 1.0f;
+      calibration_data.offset[i] = 0.0f;
+      calibration_data.adc_offset[i] = 0x800000;
+      calibration_data.adc_gain[i] = 0x200000;
+    }
+    calibration_data.adcCalibrated = false;
+    return calibration_data;
+  }
 
+  for (size_t i = 0; i < NUM_DAC_CHANNELS; ++i) {
+    if (calibration_data.gain[i] < 0.5f || calibration_data.gain[i] > 1.5f) {
+      calibration_data.gain[i] = 1.0f;
+    }
+    if (calibration_data.offset[i] < -1.0f ||
+        calibration_data.offset[i] > 1.0f) {
+      calibration_data.offset[i] = 0.0f;
+    }
+  }
 
-void setup()
-{
+  return calibration_data;
+}
+
+static void setupWorker() {
+  UserIOHandler::setup();
+
+  initDmaForWorker();
+  PeripheralCommsController::setup();
+
+  for (int i : dac_cs_pins) {
+    DACController::addChannel(i);
+  }
+
+  for (int i = 0; i < NUM_ADC_BOARDS; i++) {
+    ADCController::addBoard(adc_cs_pins[i], drdy[i], reset[i], i);
+  }
+
+  DACController::setup();
+  ADCController::setup();
+
+  God::setup();
+  God2D::setup();
+
+  while (!isCalibrationDataReady()) {
+    delay(1);
+  }
+
+  CalibrationData calibration_data;
+  readCalibrationData(calibration_data);
+
+  for (int i = 0; i < NUM_DAC_CHANNELS; i++) {
+    DACController::applyCalibration(i, calibration_data.offset[i],
+                                    calibration_data.gain[i]);
+  }
+
+  if (!calibration_data.adcCalibrated) {
+    ADCController::hardResetAllADCBoards();
+    for (int i = 0; i < NUM_ADC_BOARDS * NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      uint32_t zeroScaleCalibration =
+          ADCController::getChZeroScaleCalibration(i).getMessage().toInt();
+      uint32_t fullScaleCalibration =
+          ADCController::getChFullScaleCalibration(i).getMessage().toInt();
+
+      calibration_data.adc_offset[i] = zeroScaleCalibration;
+      calibration_data.adc_gain[i] = fullScaleCalibration;
+      calibration_data.adcCalibrated = true;
+    }
+    updateCalibrationData(calibration_data);
+  } else {
+    for (int i = 0; i < NUM_ADC_BOARDS * NUM_CHANNELS_PER_ADC_BOARD; i++) {
+      ADCController::applyChZeroScaleCalibration(i,
+                                                 calibration_data.adc_offset[i]);
+
+      if (calibration_data.adc_gain[i] != 0) {
+        ADCController::applyChFullScaleCalibration(i,
+                                                   calibration_data.adc_gain[i]);
+      }
+    }
+  }
+}
+
+void setup() {
   configureSharedMemoryMpu();
 
-  if (!initSharedMemory())
-  {
-    while (1)
-    {
-      Serial.println("Failed to initialize shared memory");
+  if (!initSharedMemory()) {
+    while (1) {
       delay(1000);
     }
   }
 
   enableM4();
 
-  CalibrationData calibrationData;
-  if (!readCalibrationFromFlash(calibrationData))
-  {
-    Serial.println("Failed to read calibration data from flash. Using default values!");
-    for (size_t i = 0; i < NUM_DAC_CHANNELS; ++i)
-    {
-      calibrationData.gain[i] = 1.0f;
-      calibrationData.offset[i] = 0.0f;
-      calibrationData.adc_offset[i] = 0x800000; // Default ADC offset
-      calibrationData.adc_gain[i] = 0x200000; // Default ADC gain
-      
-    }
-  }
-  else
-  {
-    // Validate calibration data and fix if corrupted
-    bool calibration_corrupted = false;
-    for (size_t i = 0; i < NUM_DAC_CHANNELS; ++i)
-    {
-      // Check if gain is outside reasonable range [0.5, 1.5]
-      if (calibrationData.gain[i] < 0.5f || calibrationData.gain[i] > 1.5f)
-      {
-        calibrationData.gain[i] = 1.0f;
-        calibration_corrupted = true;
-      }
-      
-      // Check if offset is outside reasonable range [-1.0, 1.0]
-      if (calibrationData.offset[i] < -1.0f || calibrationData.offset[i] > 1.0f)
-      {
-        calibrationData.offset[i] = 0.0f;
-        calibration_corrupted = true;
-      }
-    }
-    
-    if (calibration_corrupted)
-    {
-      Serial.println("Calibration data was corrupted and has been reset to defaults.");
-    }
-  }
+  CalibrationData calibration_data = loadCalibrationData();
+  publishCalibrationData(calibration_data);
 
-  initDmaForM4();
-  m7SendCalibrationData(calibrationData);
-
-  // Large AWG commands can be many kilobytes; increase the Serial read timeout
-  // so readStringUntil('\n') doesn't prematurely time out and truncate the line.
-  Serial.setTimeout(30000);
+  setupWorker();
 }
 
-void loop()
-{
-  if (Serial.available())
-  {
-    String command = Serial.readStringUntil('\n');
-    command.trim();
-    String command_lower = command;
-    command_lower.toLowerCase();
-    if (command_lower == "stop")
-    {
-      setStopFlag(true);
+void loop() {
+  UserIOHandler::handleUserIO();
+
+  if (isCalibrationDataUpdated()) {
+    CalibrationData calibration_data;
+    readCalibrationData(calibration_data);
+    if (!writeCalibrationToFlash(calibration_data)) {
+      sendTextToGateway(kFlashWriteFailure, sizeof(kFlashWriteFailure));
     }
-    else
-    {
-      m7SendChar(command.c_str(), command.length());
-    }
-  }
-  if (m7HasCharMessage())
-  {
-    char response[4096];
-    size_t size = sizeof(response);
-    if (m7ReceiveChar(response, size))
-    {
-      if (size > 0)
-      {
-        size--; // Decrease size to exclude the last character
-      }
-      Serial.write(response, size);
-      Serial.println();
-    }
-  }
-  if (m7HasFloatMessage())
-  {
-    float response[FLOAT_BUFFER_SIZE];
-    size_t size = FLOAT_BUFFER_SIZE;
-    if (m7ReceiveFloat(response, size))
-    {
-      for (size_t i = 0; i < size; ++i)
-      {
-        Serial.print(response[i], 8);
-        Serial.print(" ");
-      }
-      Serial.println();
-    }
-  }
-  if (m7HasVoltageMessage())
-  {
-    double response[VOLTAGE_BUFFER_SIZE];
-    size_t size = VOLTAGE_BUFFER_SIZE;
-    if (m7ReceiveVoltage(response, size))
-    {
-      for (size_t i = 0; i < size; ++i)
-      {
-        binaryFloat send;
-        send.floatingPoint = static_cast<float>(response[i]);
-        Serial.write(send.binary, 4);
-        // Serial.println(response[i], 8);
-      }
-    }
-  }
-  if (isCalibrationUpdated())
-  {
-    CalibrationData calibrationData;
-    m7ReceiveCalibrationData(calibrationData);
-    if (!writeCalibrationToFlash(calibrationData))
-    {
-      Serial.println("Failed to write calibration data to flash!");
-    }
+    clearCalibrationDataUpdated();
   }
 }

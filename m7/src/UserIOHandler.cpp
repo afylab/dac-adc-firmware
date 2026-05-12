@@ -17,29 +17,7 @@
 #endif
 
 __attribute__((section(".serial_number")))
-const char UserIOHandler::serial_number[29] = "__SERIAL_NUMBER__DA_2025_ABC";
-
-namespace {
-void resetFragmentAssembly(bool& assembling, uint16_t& next_seq,
-                           uint32_t& expected_total, String& assembled) {
-  assembling = false;
-  next_seq = 0;
-  expected_total = 0;
-  assembled = "";
-}
-
-uint16_t readLe16(const uint8_t* p) {
-  return static_cast<uint16_t>(p[0]) |
-         (static_cast<uint16_t>(p[1]) << 8);
-}
-
-uint32_t readLe32(const uint8_t* p) {
-  return static_cast<uint32_t>(p[0]) |
-         (static_cast<uint32_t>(p[1]) << 8) |
-         (static_cast<uint32_t>(p[2]) << 16) |
-         (static_cast<uint32_t>(p[3]) << 24);
-}
-}  // namespace
+const char UserIOHandler::serial_number[29] = "__SERIAL_NUMBER__DA_2026_ABC";
 
 void UserIOHandler::setup() {
   registerMemberFunction(nop, "NOP");
@@ -89,98 +67,21 @@ OperationResult UserIOHandler::serialNumber() {
 
 bool UserIOHandler::readCommandLine(String& out) {
   out = "";
-  if (!m4HasCharMessage()) {
+  if (!hasCommandFromGateway()) {
     return false;
   }
 
-  static bool assembling = false;
-  static uint16_t next_seq = 0;
-  static uint32_t expected_total = 0;
-  static String assembled;
-
-  char buffer[CHAR_BUFFER_SIZE];
+  char buffer[4096];
   size_t size = sizeof(buffer);
-  if (!m4ReceiveChar(buffer, size)) {
+  if (!receiveCommandFromGateway(buffer, size)) {
     return false;
   }
-
-  const uint8_t* u8 = reinterpret_cast<const uint8_t*>(buffer);
-  if (size == 0) {
-    return false;
-  }
-
-  const uint8_t frame_type = u8[0];
-  if (frame_type == CHAR_FRAME_TYPE_NORMAL) {
-    resetFragmentAssembly(assembling, next_seq, expected_total, assembled);
-    out = String(buffer + 1, size - 1);
-    return true;
-  }
-
-  if (frame_type != CHAR_FRAME_TYPE_FRAGMENT ||
-      size < CHAR_FRAGMENT_HEADER_SIZE) {
-    resetFragmentAssembly(assembling, next_seq, expected_total, assembled);
-    return false;
-  }
-
-  const uint8_t flags = u8[1];
-  const uint8_t version = u8[2];
-  const uint16_t seq = readLe16(&u8[3]);
-  const uint32_t total_len = readLe32(&u8[5]);
-
-  const bool is_first = (flags & 0x01) != 0;
-  const bool is_last = (flags & 0x02) != 0;
-
-  if (version != CHAR_FRAGMENT_VERSION || total_len == 0) {
-    resetFragmentAssembly(assembling, next_seq, expected_total, assembled);
-    return false;
-  }
-
-  if (is_first) {
-    assembling = true;
-    next_seq = 0;
-    expected_total = total_len;
-    assembled = "";
-    assembled.reserve(expected_total);
-  }
-
-  if (!assembling) {
-    return false;
-  }
-
-  if (seq != next_seq || total_len != expected_total) {
-    resetFragmentAssembly(assembling, next_seq, expected_total, assembled);
-    return false;
-  }
-
-  const size_t payload_len =
-      (size > CHAR_FRAGMENT_HEADER_SIZE) ? (size - CHAR_FRAGMENT_HEADER_SIZE)
-                                         : 0;
-  if (payload_len > 0) {
-    const uint32_t already = static_cast<uint32_t>(assembled.length());
-    if (already < expected_total) {
-      const uint32_t remaining = expected_total - already;
-      const uint32_t to_append =
-          (payload_len < remaining) ? static_cast<uint32_t>(payload_len)
-                                    : remaining;
-      assembled.concat(
-          reinterpret_cast<const char*>(&u8[CHAR_FRAGMENT_HEADER_SIZE]),
-          static_cast<unsigned int>(to_append));
-    }
-  }
-
-  next_seq++;
-
-  if (!(is_last && assembled.length() >= expected_total)) {
-    return false;
-  }
-
-  out = assembled;
-  resetFragmentAssembly(assembling, next_seq, expected_total, assembled);
+  out = String(buffer, size);
   return true;
 }
 
 void UserIOHandler::handleUserIO() {
-  while (m4HasCharMessage()) {
+  while (hasCommandFromGateway()) {
     String commandLine;
     if (!readCommandLine(commandLine)) {
       return;
@@ -210,7 +111,7 @@ void UserIOHandler::handleUserIO() {
         char* endPtr = nullptr;
         double v = strtod(p, &endPtr);
         if (endPtr == p) {
-          m4SendChar("Invalid arguments!", 19);
+          sendTextToGateway("Invalid arguments!", sizeof("Invalid arguments!"));
           return;
         }
         args.push_back(static_cast<float>(v));
@@ -228,7 +129,7 @@ void UserIOHandler::handleUserIO() {
           break;
         }
 
-        m4SendChar("Invalid arguments!", 19);
+        sendTextToGateway("Invalid arguments!", sizeof("Invalid arguments!"));
         return;
       }
     }
@@ -243,15 +144,17 @@ void UserIOHandler::handleUserIO() {
           size_t messageSize = result.getMessage().length() + 1;
           char* message = new char[messageSize];
           result.getMessage().toCharArray(message, messageSize);
-          m4SendChar(message, messageSize);
+          sendTextToGateway(message, messageSize);
           delete[] message;
         }
         break;
       case FunctionRegistry::ExecuteResult::ArgumentError:
-        m4SendChar("FAILURE: Argument error", 24);
+        sendTextToGateway("FAILURE: Argument error",
+                          sizeof("FAILURE: Argument error"));
         break;
       case FunctionRegistry::ExecuteResult::FunctionNotFound:
-        m4SendChar("FAILURE: Function not found", 28);
+        sendTextToGateway("FAILURE: Function not found",
+                          sizeof("FAILURE: Function not found"));
         break;
     }
 

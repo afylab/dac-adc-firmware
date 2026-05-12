@@ -6,53 +6,63 @@ SharedMemory* shared_memory = nullptr;
 bool initSharedMemory() {
   shared_memory = reinterpret_cast<SharedMemory*>(SHARED_MEMORY_ADDRESS);
 
-  shared_memory->m4_to_m7_char_buffer.read_index = 0;
-  shared_memory->m4_to_m7_char_buffer.write_index = 0;
-  shared_memory->m7_to_m4_char_buffer.read_index = 0;
-  shared_memory->m7_to_m4_char_buffer.write_index = 0;
-  shared_memory->m4_to_m7_float_buffer.read_index = 0;
-  shared_memory->m4_to_m7_float_buffer.write_index = 0;
-  shared_memory->m4_to_m7_voltage_buffer.read_index = 0;
-  shared_memory->m4_to_m7_voltage_buffer.write_index = 0;
+  shared_memory->gateway_to_worker_char_buffer.read_index = 0;
+  shared_memory->gateway_to_worker_char_buffer.write_index = 0;
+  shared_memory->worker_to_gateway_char_buffer.read_index = 0;
+  shared_memory->worker_to_gateway_char_buffer.write_index = 0;
+  shared_memory->worker_to_gateway_float_buffer.read_index = 0;
+  shared_memory->worker_to_gateway_float_buffer.write_index = 0;
+  shared_memory->worker_to_gateway_voltage_buffer.read_index = 0;
+  shared_memory->worker_to_gateway_voltage_buffer.write_index = 0;
 
-  shared_memory->stop_flag = false;
+  shared_memory->stop_requested = false;
 
-  shared_memory->isCalibrationUpdated = false;
-  shared_memory->isBootComplete = false;
-  shared_memory->isCalibrationReady = false;
+  shared_memory->calibration_updated = false;
+  shared_memory->worker_dma_ready = false;
+  shared_memory->calibration_ready = false;
 
   return true;
 }
 
-void m7SendCalibrationData(const CalibrationData& data) {
-  memcpy(&shared_memory->calibrationData, &data, sizeof(CalibrationData));
+void publishCalibrationData(const CalibrationData& data) {
+  memcpy(&shared_memory->calibration_data, &data, sizeof(CalibrationData));
   __DMB();
-  shared_memory->isCalibrationReady = true;
+  shared_memory->calibration_ready = true;
 }
 
-void m7ReceiveCalibrationData(CalibrationData& data) {
-  memcpy(&data, &shared_memory->calibrationData, sizeof(CalibrationData));
+void updateCalibrationData(const CalibrationData& data) {
+  memcpy(&shared_memory->calibration_data, &data, sizeof(CalibrationData));
   __DMB();
-  shared_memory->isCalibrationUpdated = false;
+  shared_memory->calibration_updated = true;
 }
 
-bool isCalibrationUpdated() {
+void readCalibrationData(CalibrationData& data) {
+  memcpy(&data, &shared_memory->calibration_data, sizeof(CalibrationData));
   __DMB();
-  return shared_memory->isCalibrationUpdated;
 }
 
-bool isBootComplete() {
+bool isCalibrationDataUpdated() {
   __DMB();
-  return shared_memory->isBootComplete;
+  return shared_memory->calibration_updated;
 }
 
-bool isCalibrationReady() {
-  __DMB();
-  return shared_memory->isCalibrationReady;
+void clearCalibrationDataUpdated() {
+  shared_memory->calibration_updated = false;
 }
 
-void setStopFlag(bool value) { shared_memory->stop_flag = value; }
-bool getStopFlag() { return shared_memory->stop_flag; }
+bool isWorkerDmaReady() {
+  __DMB();
+  return shared_memory->worker_dma_ready;
+}
+
+bool isCalibrationDataReady() {
+  __DMB();
+  return shared_memory->calibration_ready;
+}
+
+void requestWorkerStop() { shared_memory->stop_requested = true; }
+void clearWorkerStopRequest() { shared_memory->stop_requested = false; }
+bool isWorkerStopRequested() { return shared_memory->stop_requested; }
 
 // ---------------------------------------------------------------------------
 //  Utilities to safely write/read a 32-bit length into the char buffer
@@ -82,8 +92,8 @@ static uint32_t readUint32FromCharBuffer(CharCircularBuffer* buffer,
 // ---------------------------------------------------------------------------
 static bool charBufferSend(CharCircularBuffer* buffer, const char* data,
                            size_t length) {
-  // NOTE: With a 256-byte ring, and a 4-byte length header, and leaving one slot empty, the true maximum payload per message is 251.
-  constexpr size_t kMaxCharPayload = (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
+  constexpr size_t kMaxCharPayload =
+      (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
   if (length > kMaxCharPayload) return false;
 
   // We need to store 4 bytes for 'length' + the actual payload
@@ -137,72 +147,56 @@ static bool charBufferHasMessage(CharCircularBuffer* buffer) {
   return (buffer->read_index != buffer->write_index);
 }
 
-static bool floatBufferReceive(FloatCircularBuffer* buffer, float* data,
-                               size_t& length) {
-  if (buffer->read_index == buffer->write_index) {
-    length = 0;
-    return false;
+static bool floatBufferSend(FloatCircularBuffer* buffer, const float* data,
+                            size_t length) {
+  constexpr size_t kMaxFloatPayload =
+      (FLOAT_BUFFER_SIZE > 2) ? (FLOAT_BUFFER_SIZE - 2) : 0;
+  if (length > kMaxFloatPayload) return false;
+
+  uint32_t available_space =
+      (buffer->read_index - buffer->write_index - 1 + FLOAT_BUFFER_SIZE) %
+      FLOAT_BUFFER_SIZE;
+
+  if (length + 1 > available_space) return false;
+
+  uint32_t write_index = buffer->write_index;
+  buffer->buffer[write_index] = static_cast<float>(length);
+  write_index = (write_index + 1) % FLOAT_BUFFER_SIZE;
+
+  for (size_t i = 0; i < length; ++i) {
+    buffer->buffer[write_index] = data[i];
+    write_index = (write_index + 1) % FLOAT_BUFFER_SIZE;
   }
 
-  uint32_t read_index = buffer->read_index;
-
-  float msg_length_f = buffer->buffer[read_index];
-  uint32_t msg_length = static_cast<uint32_t>(msg_length_f);
-  read_index = (read_index + 1) % FLOAT_BUFFER_SIZE;
-
-  if (msg_length > length) {
-    length = msg_length;
-    return false;
-  }
-
-  for (size_t i = 0; i < msg_length; i++) {
-    data[i] = buffer->buffer[read_index];
-    read_index = (read_index + 1) % FLOAT_BUFFER_SIZE;
-  }
-
-  buffer->read_index = read_index;
-  length = msg_length;
+  buffer->write_index = write_index;
   return true;
-}
-
-static bool floatBufferHasMessage(FloatCircularBuffer* buffer) {
-  return (buffer->read_index != buffer->write_index);
 }
 
 // ---------------------------------------------------------------------------
 //  Voltage buffer operations
 // ---------------------------------------------------------------------------
-static bool voltageBufferReceive(VoltageCircularBuffer* buffer,
-                                 double* data, size_t& length) {
-  if (buffer->read_index == buffer->write_index) {
-    length = 0;
-    return false;
-  }
+static bool voltageBufferSend(VoltageCircularBuffer* buffer,
+                              const double* data, size_t length) {
+  if (length > MAX_MESSAGE_SIZE) return false;
 
-  size_t available =
-      (buffer->write_index - buffer->read_index + VOLTAGE_BUFFER_SIZE) %
+  uint32_t available_space =
+      (buffer->read_index - buffer->write_index - 1 + VOLTAGE_BUFFER_SIZE) %
       VOLTAGE_BUFFER_SIZE;
 
-  // We'll read min(length, available)
-  size_t to_read = (length < available) ? length : available;
+  if (length > available_space) return false;
 
-  for (size_t i = 0; i < to_read; ++i) {
-    data[i] = buffer->buffer[buffer->read_index];
-    buffer->read_index = (buffer->read_index + 1) % VOLTAGE_BUFFER_SIZE;
+  for (size_t i = 0; i < length; ++i) {
+    buffer->buffer[buffer->write_index] = data[i];
+    buffer->write_index = (buffer->write_index + 1) % VOLTAGE_BUFFER_SIZE;
   }
 
-  length = to_read;
   return true;
 }
 
-static bool voltageBufferHasMessage(VoltageCircularBuffer* buffer) {
-  return buffer->read_index != buffer->write_index;
-}
-
 // ---------------------------------------------------------------------------
-//  M7 char functions
+//  Worker command/response functions
 // ---------------------------------------------------------------------------
-bool m7SendChar(const char* data, size_t length) {
+bool sendTextToGateway(const char* data, size_t length) {
   // The underlying ring buffer is only CHAR_BUFFER_SIZE bytes and stores
   // an additional 4-byte length prefix per frame (see charBufferSend()).
   // That means the *true* maximum encoded frame size is (CHAR_BUFFER_SIZE - 5).
@@ -210,7 +204,8 @@ bool m7SendChar(const char* data, size_t length) {
   // Large commands (e.g. AWG with many points) can exceed this, so we fragment
   // them into multiple frames and let the M4 side reassemble.
 
-  constexpr size_t kCharFrameMaxPayload = (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0; // 251 for 256B ring
+  constexpr size_t kCharFrameMaxPayload =
+      (CHAR_BUFFER_SIZE > 5) ? (CHAR_BUFFER_SIZE - 5) : 0;
   constexpr size_t kNormalFrameOverhead = 1;
 
   auto write_le16 = [](uint8_t* p, uint16_t v) {
@@ -228,7 +223,8 @@ bool m7SendChar(const char* data, size_t length) {
     // Block until there's space; this prevents dropping long commands.
     // If the M4 stops draining the ring buffer, this would block here.
     uint32_t start_ms = millis();
-    while (!charBufferSend(&shared_memory->m7_to_m4_char_buffer, frame, frame_len)) {
+    while (!charBufferSend(&shared_memory->worker_to_gateway_char_buffer, frame,
+                           frame_len)) {
       // Avoid hard-deadlocking the M7 if the M4 is busy/crashed and not draining.
       if (millis() - start_ms > 5000) {
         return false;
@@ -269,7 +265,8 @@ bool m7SendChar(const char* data, size_t length) {
     uint8_t frame[kCharFrameMaxPayload];
     frame[0] = CHAR_FRAME_TYPE_FRAGMENT;
     // Flags
-    frame[1] = static_cast<uint8_t>((is_first ? 0x01 : 0x00) | (is_last ? 0x02 : 0x00));
+    frame[1] = static_cast<uint8_t>((is_first ? 0x01 : 0x00) |
+                                    (is_last ? 0x02 : 0x00));
     // Version
     frame[2] = CHAR_FRAGMENT_VERSION;
     // Sequence
@@ -290,7 +287,7 @@ bool m7SendChar(const char* data, size_t length) {
 
   return true;
 }
-bool m7ReceiveChar(char* data, size_t& length) {
+bool receiveCommandFromGateway(char* data, size_t& length) {
   struct CharReassemblyState {
     bool assembling = false;
     uint16_t next_seq = 0;
@@ -302,7 +299,7 @@ bool m7ReceiveChar(char* data, size_t& length) {
   const size_t output_capacity = length;
   char frame[CHAR_BUFFER_SIZE];
   size_t frame_length = sizeof(frame);
-  if (!charBufferReceive(&shared_memory->m4_to_m7_char_buffer, frame,
+  if (!charBufferReceive(&shared_memory->gateway_to_worker_char_buffer, frame,
                          frame_length)) {
     return false;
   }
@@ -405,26 +402,16 @@ bool m7ReceiveChar(char* data, size_t& length) {
   state = CharReassemblyState{};
   return true;
 }
-bool m7HasCharMessage() {
-  return charBufferHasMessage(&shared_memory->m4_to_m7_char_buffer);
+bool hasCommandFromGateway() {
+  return charBufferHasMessage(&shared_memory->gateway_to_worker_char_buffer);
 }
 
-// ---------------------------------------------------------------------------
-//  M7 float functions
-// ---------------------------------------------------------------------------
-bool m7ReceiveFloat(float* data, size_t& length) {
-  return floatBufferReceive(&shared_memory->m4_to_m7_float_buffer, data, length);
-}
-bool m7HasFloatMessage() {
-  return floatBufferHasMessage(&shared_memory->m4_to_m7_float_buffer);
+bool sendFloatResponseToGateway(const float* data, size_t length) {
+  return floatBufferSend(&shared_memory->worker_to_gateway_float_buffer, data,
+                         length);
 }
 
-// ---------------------------------------------------------------------------
-//  M7 voltage functions
-// ---------------------------------------------------------------------------
-bool m7ReceiveVoltage(double* data, size_t& length) {
-  return voltageBufferReceive(&shared_memory->m4_to_m7_voltage_buffer, data, length);
-}
-bool m7HasVoltageMessage() {
-  return voltageBufferHasMessage(&shared_memory->m4_to_m7_voltage_buffer);
+bool sendVoltageFrameToGateway(const double* data, size_t length) {
+  return voltageBufferSend(&shared_memory->worker_to_gateway_voltage_buffer, data,
+                           length);
 }
