@@ -115,19 +115,19 @@ void initDmaForM4() {
   // Serial.println("M7: DMA initialization complete. M4 can now use DMA.");
 }
 
-void enableM4()
+static void configureSharedMemoryMpu()
 {
   HAL_MPU_Disable();
 
   // Disable caching for the shared memory region.
   MPU_Region_InitTypeDef MPU_InitStruct;
   MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.BaseAddress = D3_SRAM_BASE;
-  MPU_InitStruct.Size = MPU_REGION_SIZE_64KB;
+  MPU_InitStruct.BaseAddress = SHARED_MEMORY_ADDRESS;
+  MPU_InitStruct.Size = MPU_REGION_SIZE_32KB;
   MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
   MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
   MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-  MPU_InitStruct.IsShareable = MPU_ACCESS_NOT_SHAREABLE;
+  MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
   MPU_InitStruct.Number = MPU_REGION_NUMBER15;
   MPU_InitStruct.TypeExtField = MPU_TEX_LEVEL1;
   MPU_InitStruct.SubRegionDisable = 0x00;
@@ -136,6 +136,12 @@ void enableM4()
 
   // Enable the MPU
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+  __DSB();
+  __ISB();
+}
+
+void enableM4()
+{
   // If CM4 is already booted, disable auto-boot and reset.
   FLASH_OBProgramInitTypeDef OBInit;
 
@@ -170,6 +176,8 @@ typedef union {
 
 void setup()
 {
+  configureSharedMemoryMpu();
+
   if (!initSharedMemory())
   {
     while (1)

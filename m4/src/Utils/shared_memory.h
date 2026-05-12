@@ -47,6 +47,11 @@ struct SharedMemory {
   CalibrationData calibrationData;
 };
 
+constexpr uintptr_t SHARED_MEMORY_ADDRESS = 0x10040000UL;
+constexpr size_t SHARED_MEMORY_REGION_SIZE = 32 * 1024;
+static_assert(sizeof(SharedMemory) <= SHARED_MEMORY_REGION_SIZE,
+              "SharedMemory must fit in the reserved shared SRAM window");
+
 extern SharedMemory* shared_memory;
 
 bool initSharedMemory();

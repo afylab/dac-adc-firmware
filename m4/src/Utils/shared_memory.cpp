@@ -1,11 +1,9 @@
 #include "shared_memory.h"
 
-#define SDRAM_START_ADDRESS 0x38000000
-
 SharedMemory* shared_memory = nullptr;
 
 bool initSharedMemory() {
-  shared_memory = reinterpret_cast<SharedMemory*>(SDRAM_START_ADDRESS);
+  shared_memory = reinterpret_cast<SharedMemory*>(SHARED_MEMORY_ADDRESS);
   return true;
 }
 
