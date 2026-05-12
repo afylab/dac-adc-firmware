@@ -7,3 +7,4 @@
 *.ccls*
 *compile_commands.json
 *.DS_Store*
+calibration_backups/

@@ -17,7 +17,7 @@
 #endif
 
 __attribute__((section(".serial_number")))
-const char UserIOHandler::serial_number[29] = "__SERIAL_NUMBER__DA_2026_ABC";
+const char UserIOHandler::serial_number[29] = "__SERIAL_NUMBER__DA_2025_ABC";
 
 void UserIOHandler::setup() {
   registerMemberFunction(nop, "NOP");

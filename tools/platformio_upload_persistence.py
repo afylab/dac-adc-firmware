@@ -22,10 +22,11 @@ CALIBRATION_VERIFY_TIMEOUT_S = 10
 FLOAT_VERIFY_ABS_TOL = 1e-6
 ADC_CHANNEL_COUNT = 8
 MAX_DAC_CALIBRATION_RESPONSE_CHANNELS = 16
-SERIAL_PATTERN = re.compile(r"DA_2025_.{3}$")
+SERIAL_PATTERN = re.compile(r"DA_\d{4}_.{3}$")
+NO_CALIBRATION_UPLOAD_SERIAL_PATTERN = re.compile(r"DA_\d{4}____$")
 SERIAL_MARKER = b"__SERIAL_NUMBER__"
 SERIAL_FIELD_LENGTH = 12
-NO_CALIBRATION_UPLOAD_SERIAL = "DA_2025____"
+DEFAULT_SERIAL_SUFFIX = "ABC"
 DEFAULT_CALIBRATION_BACKUP_DIR_NAME = "calibration_backups"
 
 M4_ENVIRONMENT_MAP = {
@@ -103,6 +104,21 @@ def get_calibration_backup_path(env, state):
         index += 1
 
 
+def current_serial_prefix():
+    return f"DA_{datetime.now().year}"
+
+
+def serial_with_current_year(serial_number):
+    if not SERIAL_PATTERN.fullmatch(serial_number or ""):
+        raise RuntimeError(f"Invalid serial number '{serial_number}'.")
+    suffix = serial_number.rsplit("_", 1)[1]
+    return f"{current_serial_prefix()}_{suffix}"
+
+
+def default_serial_with_current_year():
+    return f"{current_serial_prefix()}_{DEFAULT_SERIAL_SUFFIX}"
+
+
 KNOWN_GIGA_VIDS_PIDS = {
     (0x2341, 0x0266),
 }
@@ -128,14 +144,26 @@ def is_giga_port(port):
     return (vid, pid) in KNOWN_GIGA_VIDS_PIDS
 
 
-def find_giga_port(env=None):
+def port_matches_serial(port, expected_serial_number):
+    if not expected_serial_number:
+        return True
+    return (
+        port.serial_number == expected_serial_number
+        or expected_serial_number in (port.device or "")
+        or expected_serial_number in (port.hwid or "")
+    )
+
+
+def find_giga_port(env=None, expected_serial_number=None):
     ports = list(serial.tools.list_ports.comports())
     if env is not None:
         upload_port = env.subst("$UPLOAD_PORT")
         if upload_port and upload_port != "$UPLOAD_PORT":
             existing = next((p for p in ports if p.device == upload_port), None)
             if existing:
-                if is_giga_port(existing):
+                if is_giga_port(existing) and port_matches_serial(
+                    existing, expected_serial_number
+                ):
                     log(f"Using configured upload port: {upload_port}")
                     return upload_port
                 log(
@@ -147,7 +175,9 @@ def find_giga_port(env=None):
                 )
 
     for port in ports:
-        if is_giga_port(port):
+        if is_giga_port(port) and port_matches_serial(
+            port, expected_serial_number
+        ):
             log(f"Found GIGA port {port.device} ({port.hwid})")
             return port.device
 
@@ -199,9 +229,9 @@ def wait_for_ready(ser):
     raise RuntimeError("Device never reported READY.")
 
 
-def wait_for_device_ready(env=None, port=None):
+def wait_for_device_ready(env=None, port=None, expected_serial_number=None):
     last_error = None
-    if port is not None:
+    if port is not None and expected_serial_number is None:
         log(f"Waiting for same port to become ready: {port}")
         for _ in range(READY_RETRY_COUNT):
             try:
@@ -215,7 +245,9 @@ def wait_for_device_ready(env=None, port=None):
         raise RuntimeError(f"Device never became ready after upload: {last_error}")
 
     for _ in range(READY_RETRY_COUNT):
-        current_port = find_giga_port(env)
+        current_port = find_giga_port(env, expected_serial_number)
+        if current_port is None and port is not None:
+            current_port = port
         if current_port is None:
             time.sleep(READY_RETRY_DELAY_S)
             continue
@@ -550,6 +582,7 @@ def backup_device_state(port):
             raise RuntimeError(
                 "Could not determine a valid serial number from the current firmware."
             )
+        serial_number = serial_with_current_year(serial_number)
 
         dac_offsets, dac_gains = read_dac_calibration(
             ser, get_dac_channel_count_for_environment(source_environment)
@@ -603,7 +636,7 @@ def load_state(env):
 
 
 def is_no_calibration_upload_serial(serial_number):
-    return serial_number == NO_CALIBRATION_UPLOAD_SERIAL
+    return bool(NO_CALIBRATION_UPLOAD_SERIAL_PATTERN.fullmatch(serial_number or ""))
 
 
 def firmware_hangs_on_noop(ser):
@@ -684,7 +717,11 @@ def run_post_upload(env):
         delete_state(env)
         return
 
-    port = wait_for_device_ready(env, port=state.get("source_port"))
+    port = wait_for_device_ready(
+        env,
+        port=state.get("source_port"),
+        expected_serial_number=state.get("serial_number"),
+    )
     log(f"Restoring calibration on {port}...")
     try:
         with operation_timeout(

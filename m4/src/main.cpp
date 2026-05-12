@@ -16,6 +16,7 @@ typedef union {
 namespace {
 
 constexpr uint8_t kUsbStringDescriptor = 0x03;
+volatile bool bootloader_touch_requested = false;
 
 static const uint8_t kManufacturerDescriptor[] = {
     24, kUsbStringDescriptor, 's', 0, 'p', 0, '2', 0, ' ', 0, 'q', 0,
@@ -31,7 +32,7 @@ constexpr size_t kDacSerialFieldLength = 12;
 
 __attribute__((section(".serial_number"), used))
 static const char kDacSerialNumber[kSerialMarkerLength + kDacSerialFieldLength] =
-    "__SERIAL_NUMBER__DA_2026_ABC";
+    "__SERIAL_NUMBER__DA_2025_ABC";
 
 static const uint8_t* dacSerialDescriptor() {
   static uint8_t descriptor[2 + kDacSerialFieldLength * 2];
@@ -59,6 +60,15 @@ static const uint8_t* dacSerialDescriptor() {
   return descriptor;
 }
 
+static void resetToBootloaderDfu() {
+  __HAL_RCC_PWR_CLK_ENABLE();
+  HAL_PWR_EnableBkUpAccess();
+  RTC_HandleTypeDef rtc_handle = {};
+  rtc_handle.Instance = RTC;
+  HAL_RTCEx_BKUPWrite(&rtc_handle, RTC_BKP_DR0, 0xDF59);
+  NVIC_SystemReset();
+}
+
 class GateKeeperUSBCDC : public USBCDC {
  public:
   using USBCDC::USBCDC;
@@ -74,6 +84,15 @@ class GateKeeperUSBCDC : public USBCDC {
 
   const uint8_t* string_iserial_desc() override {
     return dacSerialDescriptor();
+  }
+
+  void line_coding_changed(int baud, int bits, int parity, int stop) override {
+    (void)bits;
+    (void)parity;
+    (void)stop;
+    if (baud == 1200) {
+      bootloader_touch_requested = true;
+    }
   }
 };
 
@@ -112,6 +131,12 @@ void setup() {
 }
 
 void loop() {
+  if (bootloader_touch_requested) {
+    usb_cdc.disconnect();
+    delay(250);
+    resetToBootloaderDfu();
+  }
+
   static char command_buffer[4096];
   static size_t command_length = 0;
 
