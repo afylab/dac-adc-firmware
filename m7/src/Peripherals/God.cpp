@@ -64,7 +64,7 @@ OperationResult dacWriteFailure(int channel, double voltage) {
     return OperationResult::Failure(message);
   }
 
-  message += " source=dma ";
+  message += " source=spi ";
   message += PeripheralCommsController::getDiagnostics().getMessage();
   return OperationResult::Failure(message);
 }
@@ -95,6 +95,33 @@ bool sendVoltageFrame(const double* packets, size_t length) {
   }
   requestWorkerStop();
   return false;
+}
+
+class DeferredSpiErrorScope {
+ public:
+  DeferredSpiErrorScope() { PeripheralCommsController::beginDeferredSpiErrors(); }
+
+  ~DeferredSpiErrorScope() {
+    if (active_) {
+      PeripheralCommsController::cancelDeferredSpiErrors();
+    }
+  }
+
+  OperationResult finish() {
+    active_ = false;
+    return PeripheralCommsController::endDeferredSpiErrors();
+  }
+
+ private:
+  bool active_ = true;
+};
+
+OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
+  OperationResult spiResult = spiErrors.finish();
+  if (!spiResult.isSuccess()) {
+    return spiResult;
+  }
+  return OperationResult::Success();
 }
 }
 
@@ -417,6 +444,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     BoardUsage boardUsage{0, std::vector<uint8_t>()};
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
 
     OperationResult prepareResult = prepareTimeSeriesBufferRampHardware(
         numAdcChannels, dac_interval_us, adc_interval_us, adcChannels, adcMask,
@@ -445,7 +473,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       return OperationResult::Failure("RAMPING_STOPPED");
     }
 
-    return rampResult;
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -546,6 +574,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       nextVoltageSet[i] = dacV0s[i];
     }
 
+    DeferredSpiErrorScope spiErrors;
+
     for (int i = 0; i < numDacChannels; i++) {
       if (!DACController::setVoltageNoTransactionNoLdac(dacChannels[i],
                                                         dacV0s[i])) {
@@ -605,7 +635,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       return OperationResult::Failure("Voltage output buffer overflow");
     }
 
-    return OperationResult::Success();
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -725,6 +755,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     BoardUsage boardUsage{0, std::vector<uint8_t>()};
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
 
     OperationResult prepareResult = prepareDacLedBufferRampHardware(
         numAdcChannels, numAdcAverages, dac_interval_us, dac_settling_time_us,
@@ -753,7 +784,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       return OperationResult::Failure("RAMPING_STOPPED");
     }
 
-    return rampResult;
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -771,6 +802,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     digitalWrite(adc_sync, LOW);
 
     boardUsage = getUsedBoards(adcChannels, numAdcChannels);
+
 
     attachAdcSyncInterrupts(boardUsage);
     adcMask = adcMaskForBoardUsage(boardUsage);
@@ -812,6 +844,8 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     double numAdcAveragesInv = 1.0 / static_cast<double>(numAdcAverages);
     int dacIncrements = 0;
+
+    DeferredSpiErrorScope spiErrors;
 
     for (int i = 0; i < numDacChannels; i++) {
       if (!DACController::setVoltageNoTransactionNoLdac(dacChannels[i],
@@ -893,7 +927,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       return OperationResult::Failure(message);
     }
 
-    return OperationResult::Success();
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -1072,6 +1106,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
   
       clearWorkerStopRequest();
       PeripheralCommsController::dataLedOn();
+      DeferredSpiErrorScope spiErrors;
   
       ADCController::resetToPreviousConversionTimes();
   
@@ -1233,7 +1268,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
         return OperationResult::Failure("RAMPING_STOPPED");
       }
   
-      return OperationResult::Success();
+      return finishRampOrSpiFailure(spiErrors);
     }
 
 
@@ -1318,6 +1353,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
 
     // Apply initial step immediately; first LDAC edge will latch these values.
     for (int i = 0; i < numDacChannels; i++) {
@@ -1354,7 +1390,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       clearWorkerStopRequest();
       return OperationResult::Failure("RAMPING_STOPPED");
     }
-    return OperationResult::Success();
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -1460,6 +1496,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
     ADCController::resetToPreviousConversionTimes();
 
     double packets[kMaxAdcChannels] = {};
@@ -1559,7 +1596,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       }
       return OperationResult::Failure("RAMPING_STOPPED");
     }
-    return OperationResult::Success();
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -1605,6 +1642,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
 
     ADCController::resetToPreviousConversionTimes();
 
@@ -1625,6 +1663,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
     float maxConvTime = *std::max_element(std::begin(convTimeSum), std::end(convTimeSum));
     uint32_t totalDacSweepTime = numDacStepsPerLoop * dac_interval_us;
     if(maxConvTime*numAdcAverages + 180 >= totalDacSweepTime) {
+      PeripheralCommsController::dataLedOff();
       return OperationResult::Failure("DAC sweep time is too short for specified ADC conversion time, please increase dac_interval_us or reduce numDacStepsPerLoop");
     }
 
@@ -1737,7 +1776,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       return OperationResult::Failure("RAMPING_STOPPED");
     }
 
-    return OperationResult::Success();
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -1886,6 +1925,7 @@ bool sendVoltageFrame(const double* packets, size_t length) {
 
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
 
     double voltageStepSizeLow[kMaxDacChannels] = {};
     double voltageStepSizeHigh[kMaxDacChannels] = {};
@@ -2022,5 +2062,5 @@ bool sendVoltageFrame(const double* packets, size_t length) {
       return OperationResult::Failure("RAMPING_STOPPED");
     }
 
-    return OperationResult::Success();
+    return finishRampOrSpiFailure(spiErrors);
   }

@@ -34,6 +34,33 @@ OperationResult validateAdcChannels(const int* channels, int count) {
   }
   return OperationResult::Success();
 }
+
+class DeferredSpiErrorScope {
+ public:
+  DeferredSpiErrorScope() { PeripheralCommsController::beginDeferredSpiErrors(); }
+
+  ~DeferredSpiErrorScope() {
+    if (active_) {
+      PeripheralCommsController::cancelDeferredSpiErrors();
+    }
+  }
+
+  OperationResult finish() {
+    active_ = false;
+    return PeripheralCommsController::endDeferredSpiErrors();
+  }
+
+ private:
+  bool active_ = true;
+};
+
+OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
+  OperationResult spiResult = spiErrors.finish();
+  if (!spiResult.isSuccess()) {
+    return spiResult;
+  }
+  return OperationResult::Success();
+}
 }
 
   void God2D::setup() { initializeRegistry(); }
@@ -187,6 +214,7 @@ OperationResult validateAdcChannels(const int* channels, int count) {
 
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
 
     uint8_t adcMask = 0u;
     God::BoardUsage boardUsage{0, std::vector<uint8_t>()};
@@ -274,7 +302,7 @@ OperationResult validateAdcChannels(const int* channels, int count) {
       return OperationResult::Failure("2D RAMPING_STOPPED");
     }
 
-    return rampResult;
+    return finishRampOrSpiFailure(spiErrors);
   }
 
 
@@ -427,6 +455,7 @@ OperationResult validateAdcChannels(const int* channels, int count) {
 
     clearWorkerStopRequest();
     PeripheralCommsController::dataLedOn();
+    DeferredSpiErrorScope spiErrors;
 
     uint8_t adcMask = 0u;
     God::BoardUsage boardUsage{0, std::vector<uint8_t>()};
@@ -511,5 +540,5 @@ OperationResult validateAdcChannels(const int* channels, int count) {
       return OperationResult::Failure("2D RAMPING_STOPPED");
     }
 
-    return rampResult;
+    return finishRampOrSpiFailure(spiErrors);
   }

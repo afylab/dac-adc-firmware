@@ -16,22 +16,8 @@
 #error "This code is intended for STM32H7 based boards like Arduino Giga."
 #endif
 
-#define SPI1_TX_DMA 38
-#define SPI1_RX_DMA 37
-#define SPI5_TX_DMA 86
-#define SPI5_RX_DMA 85
-
-constexpr uint32_t kDmaDisableTimeout = 100000;
 constexpr char kFlashWriteFailure[] =
     "Failed to write calibration data to flash!";
-
-#ifndef RCC_AHB1ENR_DMAMUX1EN
-#define RCC_AHB1ENR_DMAMUX1EN (1U << 2)
-#endif
-
-#ifndef RCC_APB2ENR_SPI5EN
-#define RCC_APB2ENR_SPI5EN (1U << 20)
-#endif
 
 #define return_if_not_ok(x) \
   do {                      \
@@ -39,73 +25,6 @@ constexpr char kFlashWriteFailure[] =
     if (ret != HAL_OK)      \
       return;               \
   } while (0);
-
-static bool waitForDmaStreamDisabled(DMA_Stream_TypeDef* stream) {
-  uint32_t timeout = kDmaDisableTimeout;
-  while (stream->CR & DMA_SxCR_EN) {
-    if (timeout-- == 0) {
-      return false;
-    }
-    __DMB();
-  }
-  return true;
-}
-
-static bool disableAndClearDmaStream(DMA_Stream_TypeDef* stream,
-                                     volatile uint32_t* clearRegister,
-                                     uint32_t clearMask) {
-  stream->CR &= ~DMA_SxCR_EN;
-  if (!waitForDmaStreamDisabled(stream)) {
-    return false;
-  }
-  *clearRegister = clearMask;
-  return true;
-}
-
-void initDmaForWorker() {
-  RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
-  RCC->AHB1ENR |= RCC_AHB1ENR_DMAMUX1EN;
-  SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI1EN);
-  SET_BIT(RCC->APB2ENR, RCC_APB2ENR_SPI5EN);
-
-  volatile uint32_t dummy_read = RCC->AHB1ENR;
-  dummy_read = RCC->APB2ENR;
-  (void)dummy_read;
-  delay(1);
-
-  DMAMUX1_Channel0->CCR = SPI1_TX_DMA;
-  DMAMUX1_Channel1->CCR = SPI1_RX_DMA;
-  DMAMUX1_Channel2->CCR = SPI5_TX_DMA;
-  DMAMUX1_Channel3->CCR = SPI5_RX_DMA;
-
-  if (!disableAndClearDmaStream(
-          DMA1_Stream0, &DMA1->LIFCR,
-          DMA_LIFCR_CFEIF0 | DMA_LIFCR_CDMEIF0 | DMA_LIFCR_CTEIF0 |
-              DMA_LIFCR_CHTIF0 | DMA_LIFCR_CTCIF0)) {
-    return;
-  }
-  if (!disableAndClearDmaStream(
-          DMA1_Stream1, &DMA1->LIFCR,
-          DMA_LIFCR_CFEIF1 | DMA_LIFCR_CDMEIF1 | DMA_LIFCR_CTEIF1 |
-              DMA_LIFCR_CHTIF1 | DMA_LIFCR_CTCIF1)) {
-    return;
-  }
-  if (!disableAndClearDmaStream(
-          DMA1_Stream2, &DMA1->LIFCR,
-          DMA_LIFCR_CFEIF2 | DMA_LIFCR_CDMEIF2 | DMA_LIFCR_CTEIF2 |
-              DMA_LIFCR_CHTIF2 | DMA_LIFCR_CTCIF2)) {
-    return;
-  }
-  if (!disableAndClearDmaStream(
-          DMA1_Stream3, &DMA1->LIFCR,
-          DMA_LIFCR_CFEIF3 | DMA_LIFCR_CDMEIF3 | DMA_LIFCR_CTEIF3 |
-              DMA_LIFCR_CHTIF3 | DMA_LIFCR_CTCIF3)) {
-    return;
-  }
-
-  __DMB();
-  shared_memory->worker_dma_ready = true;
-}
 
 static void configureSharedMemoryMpu() {
   HAL_MPU_Disable();
@@ -211,7 +130,6 @@ static CalibrationData loadCalibrationData() {
 static void setupWorker() {
   UserIOHandler::setup();
 
-  initDmaForWorker();
   PeripheralCommsController::setup();
 
   for (int i : dac_cs_pins) {

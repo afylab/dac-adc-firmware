@@ -1,8 +1,30 @@
 #include "Peripherals/DAC/DACController.h"
 
 #include "FunctionRegistry/FunctionRegistryHelpers.h"
+#include "Peripherals/PeripheralCommsController.h"
 #include "Utils/TimingUtil.h"
 #include "Utils/shared_memory.h"
+
+namespace {
+class DeferredSpiErrorScope {
+ public:
+  DeferredSpiErrorScope() { PeripheralCommsController::beginDeferredSpiErrors(); }
+
+  ~DeferredSpiErrorScope() {
+    if (active_) {
+      PeripheralCommsController::cancelDeferredSpiErrors();
+    }
+  }
+
+  OperationResult finish() {
+    active_ = false;
+    return PeripheralCommsController::endDeferredSpiErrors();
+  }
+
+ private:
+  bool active_ = true;
+};
+}
 
 float DACLimits::upper_voltage_limit[NUM_DAC_CHANNELS];
 float DACLimits::lower_voltage_limit[NUM_DAC_CHANNELS];
@@ -318,6 +340,8 @@ OperationResult DACController::autoRampN(const std::vector<float>& args) {
     currentVoltages[i] = rampParams[i].v0;
   }
 
+  DeferredSpiErrorScope spiErrors;
+
   while (currentStep < numSteps) {
     if (isWorkerStopRequested()) {
       break;
@@ -348,5 +372,9 @@ OperationResult DACController::autoRampN(const std::vector<float>& args) {
     return OperationResult::Failure("RAMPING_STOPPED");
   }
 
+  OperationResult spiResult = spiErrors.finish();
+  if (!spiResult.isSuccess()) {
+    return spiResult;
+  }
   return OperationResult::Success(output);
 }

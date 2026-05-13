@@ -6,44 +6,42 @@
 
 class PeripheralCommsController {
  public:
-  struct DmaDiagnostics {
-    uint32_t spi_base;
-    uint32_t spi_sr;
-    uint32_t spi_cfg1;
-    uint32_t spi_cfg2;
-    uint32_t spi_cr1;
-    uint32_t spi_cr2;
-    uint32_t spi_ier;
-    uint32_t spi_i2scfgr;
-    uint32_t dma_lisr;
-    uint32_t tx_cr;
-    uint32_t rx_cr;
-    uint32_t tx_m0ar;
-    uint32_t rx_m0ar;
-    uint32_t tx_ndtr;
-    uint32_t rx_ndtr;
+  struct SpiDiagnostics {
     uint32_t failure_stage;
     uint32_t count;
+    uint32_t completed_transfers;
+    uint32_t failed_transfers;
+    uint32_t timeout_us;
+    int cs_pin;
+    int start_result;
+    int callback_event;
+    uint8_t spi_mode;
     bool is_dac;
+    bool initialized;
     bool transfer_ok;
+    bool timeout;
+    bool callback_seen;
+    bool deferred_errors;
+    bool sticky_error;
+    bool bus_shared;
   };
 
  private:
   static bool spiInitialized;
-  static bool dmaReady;
   static bool lastTransferOk;
-  static DmaDiagnostics lastDiagnostics;
+  static bool deferSpiErrors;
+  static bool stickySpiError;
+  static uint8_t deferSpiErrorDepth;
+  static SpiDiagnostics lastDiagnostics;
+  static SpiDiagnostics firstStickyDiagnostics;
   int cs_pin;
 
-  static constexpr size_t kDmaBufferSize = 64;
-  static constexpr uint32_t kDmaTransferTimeout = 100000;
+  static constexpr size_t kSpiBufferSize = 64;
+  static uint8_t __attribute__((aligned(32))) tx_buffer[kSpiBufferSize];
+  static uint8_t __attribute__((aligned(32))) rx_buffer[kSpiBufferSize];
 
-  static uint8_t __attribute__((aligned(32))) dma_tx_buffer[kDmaBufferSize];
-  static uint8_t __attribute__((aligned(32))) dma_rx_buffer[kDmaBufferSize];
-
-  static bool waitForDmaInit();
-  bool performDmaTransfer(bool is_dac, uint8_t* tx_buffer,
-                          uint8_t* rx_buffer, size_t count);
+  bool performMbedTransfer(bool is_dac, uint8_t* tx, uint8_t* rx,
+                           size_t count);
 
  public:
   explicit PeripheralCommsController(int cs_pin);
@@ -59,6 +57,10 @@ class PeripheralCommsController {
   uint8_t transferADCNoTransaction(uint8_t data);
   static bool lastTransferSucceeded();
   static OperationResult getDiagnostics();
+  static void beginDeferredSpiErrors();
+  static OperationResult endDeferredSpiErrors();
+  static void cancelDeferredSpiErrors();
+  static bool hasDeferredSpiError();
   static void dataLedOn();
   static void dataLedOff();
 };
