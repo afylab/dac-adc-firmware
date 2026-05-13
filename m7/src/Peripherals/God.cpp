@@ -71,21 +71,33 @@ OperationResult dacWriteFailure(int channel, double voltage) {
 }
 
 OperationResult validateDacChannels(const int* channels, int count) {
+  bool seen[kMaxDacChannels] = {};
   for (int i = 0; i < count; i++) {
     if (!DACController::isChannelIndexValid(channels[i])) {
       return OperationResult::Failure("Invalid DAC channel index " +
                                       String(channels[i]));
     }
+    if (seen[channels[i]]) {
+      return OperationResult::Failure("Duplicate DAC channel index " +
+                                      String(channels[i]));
+    }
+    seen[channels[i]] = true;
   }
   return OperationResult::Success();
 }
 
 OperationResult validateAdcChannels(const int* channels, int count) {
+  bool seen[kMaxAdcChannels] = {};
   for (int i = 0; i < count; i++) {
     if (!ADCController::isChannelIndexValid(channels[i])) {
       return OperationResult::Failure("Invalid ADC channel index " +
                                       String(channels[i]));
     }
+    if (seen[channels[i]]) {
+      return OperationResult::Failure("Duplicate ADC channel index " +
+                                      String(channels[i]));
+    }
+    seen[channels[i]] = true;
   }
   return OperationResult::Success();
 }
