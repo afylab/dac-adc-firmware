@@ -2,6 +2,7 @@
 
 #include "FunctionRegistry/FunctionRegistryHelpers.h"
 #include "Peripherals/PeripheralCommsController.h"
+#include "Utils/FastGpio.h"
 #include "Utils/TimingUtil.h"
 #include "Utils/shared_memory.h"
 
@@ -102,7 +103,7 @@ void DACController::setup() {
   DACLimits::initializeLimits();
 
   pinMode(ldac, OUTPUT);
-  digitalWrite(ldac, HIGH);
+  FastGpio::digitalWrite(ldac, true);
   initializeRegistry();
   for (auto& channel : dac_channels) {
     channel.setup();
@@ -167,8 +168,7 @@ OperationResult DACController::toggleLdacTest() {
 }
 
 void DACController::toggleLdac() {
-  digitalWrite(ldac, LOW);
-  digitalWrite(ldac, HIGH);
+  FastGpio::pulseLowHigh(ldac);
 }
 
 OperationResult DACController::getVoltage(int channel_index) {

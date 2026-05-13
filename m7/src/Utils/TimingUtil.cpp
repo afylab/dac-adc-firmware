@@ -1,6 +1,7 @@
 #include "Utils/TimingUtil.h"
 
 #include "Config.h"
+#include "Utils/FastGpio.h"
 
 volatile uint8_t TimingUtil::adcFlag = 0;
 volatile bool TimingUtil::dacFlag = false;
@@ -263,8 +264,7 @@ void TimingUtil::disableAdcInterrupt() {
 extern "C" void TIM1_UP_IRQHandler(void) {
   if (TIM1->SR & TIM_SR_UIF) {
     TIM1->SR &= ~TIM_SR_UIF;
-    digitalWrite(ldac, LOW);
-    digitalWrite(ldac, HIGH);
+    FastGpio::pulseLowHigh(ldac);
     TimingUtil::dacFlag = true;
     __SEV();
   }
@@ -274,7 +274,7 @@ extern "C" void TIM8_UP_TIM13_IRQHandler(void) {
   if (TIM8->SR & TIM_SR_UIF) {
     TIM8->SR &= ~TIM_SR_UIF;
 #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, HIGH);
+    FastGpio::digitalWrite(adc_sync, true);
 #else
     TimingUtil::adcFlag = true;
     __SEV();
@@ -286,7 +286,7 @@ extern "C" void TIM8_CC_IRQHandler(void) {
   if (TIM8->SR & TIM_SR_CC1IF) {
     TIM8->SR &= ~TIM_SR_CC1IF;
 #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, HIGH);
+    FastGpio::digitalWrite(adc_sync, true);
 #else
     TimingUtil::adcFlag = true;
     __SEV();

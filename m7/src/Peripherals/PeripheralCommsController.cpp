@@ -8,6 +8,7 @@
 #include "drivers/SPIMaster.h"
 #include "hal/dma_api.h"
 #include "hal/spi_api.h"
+#include "Utils/FastGpio.h"
 
 #ifndef DEVICE_SPI_ASYNCH
 #define DEVICE_SPI_ASYNCH 0
@@ -283,13 +284,13 @@ bool PeripheralCommsController::performMbedTransfer(bool is_dac, uint8_t* tx,
   asyncTransferEvent = 0;
 
   SpiBusState& bus = busForTransfer(is_dac);
-  digitalWrite(cs_pin, LOW);
+  FastGpio::digitalWrite(cs_pin, false);
   const int startResult = bus.spi->transfer<uint8_t>(
       tx_buffer, static_cast<int>(count), rx_buffer, static_cast<int>(count),
       mbed::event_callback_t(asyncTransferCallback), SPI_EVENT_ALL);
 
   if (startResult != 0) {
-    digitalWrite(cs_pin, HIGH);
+    FastGpio::digitalWrite(cs_pin, true);
     failedTransfers++;
     clearCallerBuffer(tx, rx, count);
     lastDiagnostics = makeDiagnostics(true, is_dac, cs_pin, count,
@@ -322,7 +323,7 @@ bool PeripheralCommsController::performMbedTransfer(bool is_dac, uint8_t* tx,
   if (timeout) {
     bus.spi->abort_all_transfers();
   }
-  digitalWrite(cs_pin, HIGH);
+  FastGpio::digitalWrite(cs_pin, true);
 
   const bool eventOk = callbackSeen &&
                        ((callbackEvent & SPI_EVENT_COMPLETE) != 0) &&
@@ -496,10 +497,6 @@ bool PeripheralCommsController::hasDeferredSpiError() {
   return stickySpiError;
 }
 
-void PeripheralCommsController::dataLedOn() {
-  /* digitalWrite(led, HIGH); */
-}
+void PeripheralCommsController::dataLedOn() {}
 
-void PeripheralCommsController::dataLedOff() {
-  /* digitalWrite(led, LOW); */
-}
+void PeripheralCommsController::dataLedOff() {}

@@ -266,7 +266,7 @@ def trigger_dfu_mode(dfu_util, port):
     try:
         with serial.Serial(port, 1200, timeout=1):
             pass
-    except serial.SerialException as exc:
+    except (serial.SerialException, OSError) as exc:
         log(f"1200-baud touch failed: {exc}")
     if wait_for_dfu_device(dfu_util, DFU_AUTO_WAIT_S):
         return

@@ -1,5 +1,7 @@
 #include "Peripherals/ADC/ADCBoard.h"
 
+#include "Utils/FastGpio.h"
+
 
 
   void ADCBoard::waitDataReady() {
@@ -9,7 +11,7 @@
       delay(1);
     }
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
     #endif
   }
 
@@ -31,17 +33,17 @@
     //attachInterrupt(digitalPinToInterrupt(data_ready_pin), this->RDY_ISR, FALLING);
 
     pinMode(cs_pin, OUTPUT);
-    digitalWrite(cs_pin, HIGH);
+    FastGpio::digitalWrite(cs_pin, true);
 
     // Resets ADC on startup.
-    digitalWrite(reset_pin, HIGH);
-    digitalWrite(reset_pin, LOW);
+    FastGpio::digitalWrite(reset_pin, true);
+    FastGpio::digitalWrite(reset_pin, false);
     delay(5);
-    digitalWrite(reset_pin, HIGH);
+    FastGpio::digitalWrite(reset_pin, true);
 
     #ifdef __NEW_DAC_ADC__
     pinMode(adc_sync, OUTPUT);
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
 
     //Set I/O Register such that P1 bit is set as input and SYNC pin function is enabled
     byte data[2];
@@ -214,11 +216,11 @@
     // setup mode register
     data[1] = SINGLE_CONV_MODE;
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
     #endif
     commsController.transferADC(data, 2);
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, HIGH);
+    FastGpio::digitalWrite(adc_sync, true);
     #endif
 
     // data is ready when _rdy goes low
@@ -343,10 +345,10 @@
 
 
   void ADCBoard::hardReset() {
-    digitalWrite(reset_pin, HIGH);
-    digitalWrite(reset_pin, LOW);
+    FastGpio::digitalWrite(reset_pin, true);
+    FastGpio::digitalWrite(reset_pin, false);
     delay(5);
-    digitalWrite(reset_pin, HIGH);
+    FastGpio::digitalWrite(reset_pin, true);
 
     for (int i = 0; i < NUM_CHANNELS_PER_ADC_BOARD; i++) {
       idleMode(i);
@@ -382,10 +384,10 @@
 
 
   void ADCBoard::reset() {
-    digitalWrite(reset_pin, HIGH);
-    digitalWrite(reset_pin, LOW);
+    FastGpio::digitalWrite(reset_pin, true);
+    FastGpio::digitalWrite(reset_pin, false);
     delay(5);
-    digitalWrite(reset_pin, HIGH);
+    FastGpio::digitalWrite(reset_pin, true);
 
     // commsController.transferADC(0x28);
     // commsController.transferADC(0);
@@ -541,7 +543,7 @@
     data[0] = WRITE | ADDR_MODE(0);  // channel is zero but this is system-wide
     data[1] = ZERO_SCALE_SELF_CAL_MODE;
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, HIGH);
+    FastGpio::digitalWrite(adc_sync, true);
     #endif
     commsController.transferADC(data, 2);
     waitDataReady();
@@ -554,7 +556,7 @@
     data[0] = WRITE | ADDR_MODE(channel);
     data[1] = CH_ZERO_SCALE_SYS_CAL_MODE;
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, HIGH);
+    FastGpio::digitalWrite(adc_sync, true);
     #endif
     commsController.transferADC(data, 2);
     waitDataReady();
@@ -578,7 +580,7 @@
     data[0] = WRITE | ADDR_MODE(channel);
     data[1] = CH_FULL_SCALE_SYS_CAL_MODE;
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, HIGH);
+    FastGpio::digitalWrite(adc_sync, true);
     #endif
     commsController.transferADC(data, 2);
     waitDataReady();

@@ -1,6 +1,7 @@
 #include "Peripherals/God.h"
 
 #include "FunctionRegistry/FunctionRegistryHelpers.h"
+#include "Utils/FastGpio.h"
 
 namespace {
 constexpr int kMaxDacChannels = NUM_DAC_CHANNELS;
@@ -89,6 +90,69 @@ OperationResult validateAdcChannels(const int* channels, int count) {
   return OperationResult::Success();
 }
 
+#ifdef __NEW_DAC_ADC__
+OperationResult validateDacLedBufferRampTiming(
+    int numAdcChannels, uint32_t dacIntervalUs, uint32_t dacSettlingTimeUs,
+    const int* adcChannels) {
+  bool selectedAdcChannels[kMaxAdcChannels] = {};
+  uint8_t boardDepth[NUM_ADC_BOARDS] = {};
+  float boardConversionTimeUs[NUM_ADC_BOARDS] = {};
+
+  for (int i = 0; i < numAdcChannels; i++) {
+    const int channel = adcChannels[i];
+    if (channel < 0 || channel >= kMaxAdcChannels ||
+        selectedAdcChannels[channel]) {
+      continue;
+    }
+    selectedAdcChannels[channel] = true;
+    boardDepth[channel / NUM_CHANNELS_PER_ADC_BOARD]++;
+  }
+
+  for (int channel = 0; channel < kMaxAdcChannels; channel++) {
+    if (!selectedAdcChannels[channel]) {
+      continue;
+    }
+    const uint8_t board = channel / NUM_CHANNELS_PER_ADC_BOARD;
+    const bool multiChannelScan = boardDepth[board] > 1;
+    const float conversionTimeUs =
+        ADCController::getConversionTimeFloat(channel, multiChannelScan);
+    if (conversionTimeUs < 0.0f) {
+      return OperationResult::Failure("Invalid ADC conversion time");
+    }
+    boardConversionTimeUs[board] += conversionTimeUs;
+  }
+
+  float criticalAdcTimeUs = 0.0f;
+  uint8_t maxBoardDepth = 0;
+  bool allBoardsFull = NUM_ADC_BOARDS > 1;
+  for (uint8_t board = 0; board < NUM_ADC_BOARDS; board++) {
+    if (boardConversionTimeUs[board] > criticalAdcTimeUs) {
+      criticalAdcTimeUs = boardConversionTimeUs[board];
+    }
+    if (boardDepth[board] > maxBoardDepth) {
+      maxBoardDepth = boardDepth[board];
+    }
+    allBoardsFull =
+        allBoardsFull && boardDepth[board] == NUM_CHANNELS_PER_ADC_BOARD;
+  }
+
+  const float marginUs =
+      allBoardsFull ? 30.0f : (maxBoardDepth <= 2 ? 10.0f : 15.0f);
+  const float minimumIntervalUsFloat =
+      static_cast<float>(dacSettlingTimeUs) + criticalAdcTimeUs + marginUs;
+  const uint32_t minimumIntervalUs =
+      static_cast<uint32_t>(minimumIntervalUsFloat + 0.999f);
+
+  if (dacIntervalUs < minimumIntervalUs) {
+    return OperationResult::Failure(
+        "DAC interval too short, please increase it (minimum " +
+        String(minimumIntervalUs) + " us)");
+  }
+
+  return OperationResult::Success();
+}
+#endif
+
 bool sendVoltageFrame(const double* packets, size_t length) {
   if (sendVoltageFrameToGateway(packets, length)) {
     return true;
@@ -125,7 +189,13 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
 }
 }
 
-  void God::setup() { initializeRegistry(); }
+  void God::setup() {
+    #ifdef __NEW_SHIELD__
+    pinMode(GPIO_0, OUTPUT);
+    FastGpio::digitalWrite(GPIO_0, false);
+    #endif
+    initializeRegistry();
+  }
 
 
 
@@ -269,7 +339,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     PeripheralCommsController::dataLedOn();
 
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW); //Set the sync pin low to prevent ADCs from triggering
+    FastGpio::digitalWrite(adc_sync, false); //Set the sync pin low to prevent ADCs from triggering
     BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
     attachAdcSyncInterrupts(boardUsage);
     #endif
@@ -317,7 +387,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
         TimingUtil::adcFlag = 0;
 
         #ifdef __NEW_DAC_ADC__
-        digitalWrite(adc_sync, LOW);
+        FastGpio::digitalWrite(adc_sync, false);
         #endif
       }
     }
@@ -485,7 +555,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     boardUsage = BoardUsage{0, std::vector<uint8_t>()};
 
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
 
     // Prevent user from setting the DAC update rate too fast.
     int adc_usage[4] = {0, 0, 0, 0};
@@ -585,7 +655,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     }
     steps++;
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
     #endif
     TimingUtil::dacFlag = false;
     TimingUtil::adcFlag = 0;
@@ -617,7 +687,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
         }
 
         #ifdef __NEW_DAC_ADC__
-        digitalWrite(adc_sync, LOW);
+        FastGpio::digitalWrite(adc_sync, false);
         #endif
 
         x++;
@@ -799,7 +869,13 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     ADCController::resetToPreviousConversionTimes();
 
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
+
+    OperationResult timingValidation = validateDacLedBufferRampTiming(
+        numAdcChannels, dac_interval_us, dac_settling_time_us, adcChannels);
+    if (!timingValidation.isSuccess()) {
+      return timingValidation;
+    }
 
     boardUsage = getUsedBoards(adcChannels, numAdcChannels);
 
@@ -856,11 +932,8 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     }
     dacIncrements++;
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
     #endif
-    TimingUtil::dacFlag = false;
-    TimingUtil::adcFlag = 0;
-
     int maxDiff = 0;
     int x = 0;
     bool voltageOverflow = false;
@@ -870,7 +943,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
 
       if (TimingUtil::dacFlag && dacIncrements < numSteps) {
         #ifdef __NEW_SHIELD__
-        digitalWrite(GPIO_0, LOW);
+        FastGpio::digitalWrite(GPIO_0, false);
         #endif
         for (int i = 0; i < numDacChannels; i++) {
           if (!DACController::setVoltageNoTransactionNoLdac(
@@ -884,7 +957,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
       }
       if (TimingUtil::adcFlag == adcMask) {
         #ifdef __NEW_SHIELD__
-        digitalWrite(GPIO_0, HIGH);
+        FastGpio::digitalWrite(GPIO_0, true);
         #endif
         x++;
         for (int i = 0; i < numAdcChannels; i++) {
@@ -905,7 +978,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
           maxDiff = diff;
         }
         #ifdef __NEW_DAC_ADC__
-        digitalWrite(adc_sync, LOW);
+        FastGpio::digitalWrite(adc_sync, false);
         #endif
         TimingUtil::adcFlag = 0;
       }
@@ -1111,7 +1184,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
       ADCController::resetToPreviousConversionTimes();
   
       #ifdef __NEW_DAC_ADC__
-      digitalWrite(adc_sync, LOW);
+      FastGpio::digitalWrite(adc_sync, false);
   
       BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
   
@@ -1231,7 +1304,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
           }
           
           #ifdef __NEW_DAC_ADC__
-          digitalWrite(adc_sync, LOW);
+          FastGpio::digitalWrite(adc_sync, false);
           #endif
           TimingUtil::adcFlag = 0;
           currentAdcReads++;
@@ -1488,7 +1561,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     }
 
     #ifdef __NEW_DAC_ADC__
-      digitalWrite(adc_sync, LOW);
+      FastGpio::digitalWrite(adc_sync, false);
 
       BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
       attachAdcSyncInterrupts(boardUsage);
@@ -1544,7 +1617,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
             DACController::setVoltageNoTransactionNoLdac(dacChannels[i], v);
           }
           #ifdef __NEW_DAC_ADC__
-          digitalWrite(adc_sync, HIGH);
+          FastGpio::digitalWrite(adc_sync, true);
           #endif
           step++;
         }
@@ -1552,7 +1625,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
         if (TimingUtil::adcFlag) {
           // Read ADC channels (data already converted, just read it)
           #ifdef __NEW_DAC_ADC__
-          digitalWrite(adc_sync, LOW);
+          FastGpio::digitalWrite(adc_sync, false);
           #endif
           for (int i = 0; i < numAdcChannels; i++) {
             packets[i] = ADCController::getVoltageData(adcChannels[i]);
@@ -1647,7 +1720,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     ADCController::resetToPreviousConversionTimes();
 
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
 
     BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
 
@@ -1739,7 +1812,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
         }
         
         #ifdef __NEW_DAC_ADC__
-        digitalWrite(adc_sync, LOW);
+        FastGpio::digitalWrite(adc_sync, false);
         #endif
         TimingUtil::adcFlag = 0;
         currentAdcReads++;
@@ -1950,7 +2023,7 @@ OperationResult finishRampOrSpiFailure(DeferredSpiErrorScope& spiErrors) {
     }
 
     #ifdef __NEW_DAC_ADC__
-    digitalWrite(adc_sync, LOW);
+    FastGpio::digitalWrite(adc_sync, false);
 
     BoardUsage boardUsage = getUsedBoards(adcChannels, numAdcChannels);
     attachAdcSyncInterrupts(boardUsage);

@@ -1,5 +1,6 @@
 #include "Peripherals/DAC/DACChannel.h"
 
+#include "Utils/FastGpio.h"
 
 DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) {
     this->cs_pin = cs_pin;
@@ -39,7 +40,7 @@ DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) 
   // initialize is the command INITIALIZE, setup is called in main::setup
   void DACChannel::setup() {
     pinMode(cs_pin, OUTPUT);
-    digitalWrite(cs_pin, HIGH);
+    FastGpio::digitalWrite(cs_pin, true);
   }
 
 
@@ -63,8 +64,7 @@ DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) 
       return NAN;
     }
 
-    digitalWrite(ldac, LOW);
-    digitalWrite(ldac, HIGH);
+    FastGpio::pulseLowHigh(ldac);
 
     return gain_error * (threeByteToVoltage(b1, b2, b3) + offset_error);
   }
@@ -139,9 +139,7 @@ DACChannel::DACChannel(int cs_pin, int channel_index) : commsController(cs_pin) 
       return NAN;
     }
 
-    digitalWrite(ldac, LOW);
-
-    digitalWrite(ldac, HIGH);
+    FastGpio::pulseLowHigh(ldac);
 
     return gain_error * (threeByteToVoltage(b1, b2, b3) + offset_error);
   }

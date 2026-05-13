@@ -1,6 +1,7 @@
 #include "Peripherals/ADC/ADCController.h"
 
 #include "FunctionRegistry/FunctionRegistryHelpers.h"
+#include "Utils/FastGpio.h"
 #include "Utils/shared_memory.h"
 
 std::vector<ADCBoard> ADCController::adc_boards;
@@ -28,7 +29,7 @@ void ADCController::resetToPreviousConversionTimes() {
 void ADCController::setup() {
 #ifdef __NEW_DAC_ADC__
   pinMode(adc_sync, OUTPUT);
-  digitalWrite(adc_sync, LOW);
+  FastGpio::digitalWrite(adc_sync, false);
 #endif
 
   initializeRegistry();
@@ -110,8 +111,8 @@ OperationResult ADCController::readChannelVoltage(int channel_index) {
 
 #ifdef __NEW_DAC_ADC__
 void ADCController::toggleSync() {
-  digitalWrite(adc_sync, HIGH);
-  digitalWrite(adc_sync, LOW);
+  FastGpio::digitalWrite(adc_sync, true);
+  FastGpio::digitalWrite(adc_sync, false);
 }
 #endif
 
