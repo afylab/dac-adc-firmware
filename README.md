@@ -1,12 +1,12 @@
-# DAC/ADC Firmware
+# GateKeeper Firmware
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Firmware for Young Lab AD5791 DACs / AD7734 ADCs. New features include precise timings (<300ns error) for SPI comms, new buffer ramp options, and data acquisition being in-tandem with transmission to LabRAD.
+Firmware for sp2 Quantum GateKeeper. New features include precise timings (<300ns error) for SPI comms, new buffer ramp options, and data acquisition being in-tandem with transmission to LabRAD.
 
 The firmware is designed to be easily extensible, as new peripherals can simply be added with little consideration for how other peripherals are written, as operations are all added independently to a centralized registry.
 
-**If you have any questions**, feel free to email (or slack) [markzakharyan@ucsb.edu](mailto:markzakharyan@ucsb.edu)
+**If you have any questions**, feel free to email [markzakharyan@sp2quantum.com](mailto:markzakharyan@sp2quantum.com)
 
 <!--
 ## Table of Contents
@@ -37,13 +37,27 @@ The firmware is designed to be easily extensible, as new peripherals can simply 
 
 You can also build/upload from source:
 
-This firmware is comprised of two individual PlatformIO projects, one for the M7 core and the other for the M4. To build and upload to the Arduino Giga, you need to install PlatformIO and separately upload the firmware for both the M7 and M4 processors (found in their respective folders). There is no extra configuration you need to do, as all processor information is contained in each project's platformio.ini file.
+This firmware has one root PlatformIO upload entrypoint plus separate M4 and M7 core projects. For normal development uploads, run one of these from the repo root:
+
+```sh
+pio run -e new_hardware -t upload
+pio run -e old_hardware -t upload
+pio run -e new_shield_old_dac_adc -t upload
+```
+
+Each command uploads the complete firmware bundle over USB DFU: USB gateway M4, then the selected worker M7 firmware. To build the same bundle without uploading, use:
+
+```sh
+pio run -e new_hardware
+```
+
+The `m4/` and `m7/` folders remain normal PlatformIO projects for core-specific development and debugging.
 
 ## Usage
 
 ***Firmware docs are still in progress***
 
-Note for vim users: If you have any issues with linting/LSP with (neo)vim then try running `pio run -t compiledb` in both the m7 and m4 directories.
+Note for vim users: If you have any issues with linting/LSP with (neo)vim then try running `python3 platformio_tools/update_compile_commands.py` from the firmware root.
 
 **New features of this firmware include:**
 
@@ -125,7 +139,7 @@ When two events occur at the same time, the following behavior occurs:
 
 This firmware utilizes both the M4 and M7 cores of the Arduino Giga R1. By default, the M7 core is booted and the M4 is initialized *on the M7*.
 
-The purpose of using a dual-core approach is to completely separate (very slow) Serial communications and peripheral SPI communications. Since the M4 core does not have access to USB/Serial, the M7 core is used for Serial comms and the M4 is used for peripheral SPI comms. We do this because Serial is ISR-blocking and prevents SPI from properly being executed at the precise intervals that we want. So, we need dual-core.
+The purpose of using a dual-core approach is to separate USB host communication from peripheral timing work. The M4 owns USB CDC and forwards host commands through shared memory. The M7 boots the M4, owns the DAC/ADC hardware, and executes the peripheral workload. This keeps USB/serial handling away from timing-critical SPI execution.
 
 If you Google the docs for how to implement dual-core communications between the M4 and M7 cores, it tells you to use RPC. **We do not do this!** RPC is slow for our purposes and completely screws up our precise timings for the same reason why Serial messes them up. Instead, we manually initialize the M4 core ourselves (instead of with RPC) and use a circular shared memory buffer that both the M4 and M7 have access to. We initialize the M4 core ourselves (instead of with `RPC.begin()`).
 

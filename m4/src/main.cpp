@@ -18,14 +18,18 @@ namespace {
 constexpr uint8_t kUsbStringDescriptor = 0x03;
 volatile bool bootloader_touch_requested = false;
 
-static const uint8_t kManufacturerDescriptor[] = {
-    24, kUsbStringDescriptor, 's', 0, 'p', 0, '2', 0, ' ', 0, 'q', 0,
+constexpr uint8_t kManufacturerDescriptor[] = {
+    24, kUsbStringDescriptor, 's', 0, 'p', 0, '2', 0, ' ', 0, 'Q', 0,
     'u', 0, 'a', 0, 'n', 0, 't', 0, 'u', 0, 'm', 0};
 
-static const uint8_t kProductDescriptor[] = {
-    30, kUsbStringDescriptor, 'G', 0, 'a', 0, 't', 0, 'e', 0, 'K', 0,
-    'e', 0, 'e', 0, 'p', 0, 'e', 0, 'r', 0, ' ', 0, '1', 0, '.', 0,
-    '0', 0};
+constexpr uint8_t kProductDescriptor[] = {
+    22, kUsbStringDescriptor, 'G', 0, 'a', 0, 't', 0, 'e', 0, 'K', 0,
+    'e', 0, 'e', 0, 'p', 0, 'e', 0, 'r', 0};
+
+static_assert(sizeof(kManufacturerDescriptor) == kManufacturerDescriptor[0],
+              "USB manufacturer string descriptor length is wrong.");
+static_assert(sizeof(kProductDescriptor) == kProductDescriptor[0],
+              "USB product string descriptor length is wrong.");
 
 constexpr size_t kSerialMarkerLength = 17;
 constexpr size_t kDacSerialFieldLength = 12;

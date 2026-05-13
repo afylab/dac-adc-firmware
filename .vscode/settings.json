@@ -1,0 +1,6 @@
+{
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
+  "C_Cpp.default.compilerPath": "${userHome}/.platformio/packages/toolchain-gccarmnoneeabi/bin/arm-none-eabi-g++",
+  "C_Cpp.default.intelliSenseMode": "gcc-arm",
+  "C_Cpp.errorSquiggles": "enabled"
+}

@@ -1,6 +1,5 @@
 #include <Arduino.h>
 
-#ifndef DAC_ADC_USB_UPLOAD_GUARD
 #include "Config.h"
 #include "Peripherals/ADC/ADCController.h"
 #include "Peripherals/DAC/DACController.h"
@@ -266,13 +265,8 @@ static void setupWorker() {
     }
   }
 }
-#endif
 
 void setup() {
-#ifdef DAC_ADC_USB_UPLOAD_GUARD
-  pinMode(LED_BUILTIN, OUTPUT);
-  return;
-#else
   configureSharedMemoryMpu();
 
   if (!initSharedMemory()) {
@@ -287,18 +281,9 @@ void setup() {
   publishCalibrationData(calibration_data);
 
   setupWorker();
-#endif
 }
 
 void loop() {
-#ifdef DAC_ADC_USB_UPLOAD_GUARD
-  static uint32_t last_toggle_ms = 0;
-  const uint32_t now = millis();
-  if (now - last_toggle_ms >= 500) {
-    last_toggle_ms = now;
-    digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-  }
-#else
   UserIOHandler::handleUserIO();
 
   if (isCalibrationDataUpdated()) {
@@ -309,5 +294,4 @@ void loop() {
     }
     clearCalibrationDataUpdated();
   }
-#endif
 }

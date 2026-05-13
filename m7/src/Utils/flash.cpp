@@ -1,13 +1,13 @@
 #include <Arduino.h>
 
 #ifdef abs
-#define DAC_ADC_RESTORE_ARDUINO_ABS
+#define GATEKEEPER_RESTORE_ARDUINO_ABS
 #undef abs
 #endif
 #include "QSPIFBlockDevice.h"
-#ifdef DAC_ADC_RESTORE_ARDUINO_ABS
+#ifdef GATEKEEPER_RESTORE_ARDUINO_ABS
 #define abs(x) ((x)>0?(x):-(x))
-#undef DAC_ADC_RESTORE_ARDUINO_ABS
+#undef GATEKEEPER_RESTORE_ARDUINO_ABS
 #endif
 
 #include "Utils/flash.h"

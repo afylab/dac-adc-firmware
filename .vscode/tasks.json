@@ -1,0 +1,87 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "GateKeeper: Upload Firmware Bundle",
+      "type": "process",
+      "command": "pio",
+      "args": [
+        "run",
+        "-e",
+        "${input:gatekeeperEnvironment}",
+        "-t",
+        "upload"
+      ],
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "GateKeeper: Build Firmware Bundle",
+      "type": "process",
+      "command": "pio",
+      "args": [
+        "run",
+        "-e",
+        "${input:gatekeeperEnvironment}"
+      ],
+      "group": "build",
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "GateKeeper: Clean Firmware Bundle",
+      "type": "process",
+      "command": "pio",
+      "args": [
+        "run",
+        "-e",
+        "${input:gatekeeperEnvironment}",
+        "-t",
+        "clean"
+      ],
+      "problemMatcher": "$gcc",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    },
+    {
+      "label": "GateKeeper: Refresh IntelliSense",
+      "type": "process",
+      "command": "python3",
+      "args": [
+        "platformio_tools/update_compile_commands.py",
+        "--hardware",
+        "${input:gatekeeperEnvironment}"
+      ],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "gatekeeperEnvironment",
+      "type": "pickString",
+      "description": "GateKeeper firmware target",
+      "default": "new_hardware",
+      "options": [
+        "new_hardware",
+        "old_hardware",
+        "new_shield_old_dac_adc"
+      ]
+    }
+  ]
+}
